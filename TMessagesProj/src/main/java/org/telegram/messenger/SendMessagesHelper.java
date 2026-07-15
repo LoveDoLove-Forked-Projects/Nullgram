@@ -55,6 +55,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.UiThread;
 import androidx.collection.LongSparseArray;
 import androidx.core.view.inputmethod.InputContentInfoCompat;
@@ -62,14 +63,17 @@ import androidx.core.view.inputmethod.InputContentInfoCompat;
 import org.json.JSONObject;
 import org.telegram.messenger.audioinfo.AudioInfo;
 import org.telegram.messenger.support.SparseLongArray;
+import org.telegram.messenger.utils.tlutils.TlUtils;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.NativeByteBuffer;
 import org.telegram.tgnet.RequestDelegate;
 import org.telegram.tgnet.SerializedData;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_update;
 import org.telegram.tgnet.TLRPC.MessageEntity;
 import org.telegram.tgnet.tl.TL_account;
+import org.telegram.tgnet.tl.TL_iv;
 import org.telegram.tgnet.tl.TL_stories;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -86,6 +90,15 @@ import org.telegram.ui.Components.Point;
 import org.telegram.ui.Components.Premium.LimitReachedBottomSheet;
 import org.telegram.ui.Components.Reactions.ReactionsLayoutInBubble;
 import org.telegram.ui.Components.Reactions.ReactionsUtils;
+import org.telegram.ui.Components.poll.PollAttachedMedia;
+import org.telegram.ui.Components.poll.PollAttachedMediaPack;
+import org.telegram.ui.Components.poll.PollSendParams;
+import org.telegram.ui.Components.poll.attached.PollAttachedMediaFile;
+import org.telegram.ui.Components.poll.attached.PollAttachedMediaGallery;
+import org.telegram.ui.Components.poll.attached.PollAttachedMediaLink;
+import org.telegram.ui.Components.poll.attached.PollAttachedMediaLocation;
+import org.telegram.ui.Components.poll.attached.PollAttachedMediaMusic;
+import org.telegram.ui.Components.poll.attached.PollAttachedMediaSticker;
 import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.PaymentFormActivity;
 import org.telegram.ui.Stars.StarsController;
@@ -124,6 +137,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
 
     public static final int MEDIA_TYPE_DICE = 11;
     public static final int MEDIA_TYPE_STORY = 12;
+    public static final int MEDIA_TYPE_RICH = 13;
     private final HashMap<String, ArrayList<DelayedMessage>> delayedMessages = new HashMap<>();
     private final SparseArray<MessageObject> unsentMessages = new SparseArray<>();
     private final SparseArray<TLRPC.Message> sendingMessages = new SparseArray<>();
@@ -625,6 +639,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         public TLRPC.BotInlineResult inlineResult;
         public HashMap<String, String> params;
         public boolean isVideo;
+        public boolean isLivePhoto;
+        public boolean discardLivePhoto;
         public boolean canDeleteAfter;
         public boolean forceImage;
         public boolean updateStickersOrder;
@@ -634,6 +650,9 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         public long stars;
         public boolean highQuality;
         public MediaController.PhotoEntry originalPhotoEntry;
+        public long livePhotoVideoOffset;
+        public long livePhotoTimestampUs;
+        public int pollIndex;
     }
 
     @SuppressLint("MissingPermission")
@@ -823,11 +842,13 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         public ArrayList<TLRPC.Message> messages;
         public ArrayList<TLRPC.InputMedia> inputMedias;
         public ArrayList<String> originalPaths;
+        public ArrayList<Integer> pollIndexes;
         public HashMap<Object, Object> extraHashMap;
         public long groupId;
         public int finalGroupMessage;
         public boolean scheduled;
         public boolean paidMedia;
+        public boolean pollMedia;
 
         public Object parentObject;
 
@@ -847,6 +868,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
             locations = new ArrayList<>();
             httpLocations = new ArrayList<>();
             videoEditedInfos = new ArrayList<>();
+            pollIndexes = new ArrayList<>();
         }
 
         public void addDelayedRequest(final TLObject req, final MessageObject msgObj, final String originalPath, Object parentObject, DelayedMessage delayedMessage, boolean scheduled) {
@@ -889,6 +911,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 } else if (request.request instanceof TLRPC.TL_messages_sendMultiMedia) {
                     performSendMessageRequestMulti((TLRPC.TL_messages_sendMultiMedia) request.request, request.msgObjs, request.originalPaths, request.parentObjects, request.delayedMessage, request.scheduled);
                 } else if (request.request instanceof TLRPC.TL_messages_sendMedia && ((TLRPC.TL_messages_sendMedia) request.request).media instanceof TLRPC.TL_inputMediaPaidMedia) {
+                    performSendMessageRequestMulti((TLRPC.TL_messages_sendMedia) request.request, request.msgObjs, request.originalPaths, request.parentObjects, request.delayedMessage, request.scheduled);
+                } else if (request.request instanceof TLRPC.TL_messages_sendMedia && ((TLRPC.TL_messages_sendMedia) request.request).media instanceof TLRPC.TL_inputMediaPoll) {
                     performSendMessageRequestMulti((TLRPC.TL_messages_sendMedia) request.request, request.msgObjs, request.originalPaths, request.parentObjects, request.delayedMessage, request.scheduled);
                 } else {
                     performSendMessageRequest(request.request, request.msgObj, request.originalPath, request.delayedMessage, request.parentObject, null, request.scheduled);
@@ -1021,11 +1045,19 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             } else {
                                 media = (TLRPC.InputMedia) message.extraHashMap.get(location);
                             }
+                        } else if (media instanceof TLRPC.TL_inputMediaPoll) {
+                            if (message.extraHashMap == null) {
+                                media = PollAttachedMediaPack.getFirstInputMedia((TLRPC.TL_inputMediaPoll) media);
+                            } else {
+                                media = (TLRPC.InputMedia) message.extraHashMap.get(location);
+                            }
                         }
                     } else if (message.sendRequest instanceof TLRPC.TL_messages_editMessage) {
                         media = ((TLRPC.TL_messages_editMessage) message.sendRequest).media;
                     } else if (message.sendRequest instanceof TLRPC.TL_messages_sendMultiMedia) {
                         media = (TLRPC.InputMedia) message.extraHashMap.get(location);
+                    } else if (message.sendRequest instanceof TLRPC.TL_messages_addPollAnswer) {
+                        media = ((TLRPC.TL_messages_addPollAnswer) message.sendRequest).answer.input_media;
                     }
 
                     if (file != null && media != null) {
@@ -1274,7 +1306,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                     } else if (obj.scheduled) {
                                         mode = ChatActivity.MODE_SCHEDULED;
                                     }
-                                    if (message.paidMedia && b != 0) break;
+                                    if ((message.paidMedia || message.pollMedia) && b != 0) break;
                                     getMessagesStorage().putMessages(messages, false, true, false, 0, mode, threadMessageId);
                                     break;
                                 }
@@ -1570,6 +1602,9 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             } else if (message.sendRequest instanceof TLRPC.TL_messages_sendMedia && ((TLRPC.TL_messages_sendMedia) message.sendRequest).media instanceof TLRPC.TL_inputMediaPaidMedia) {
                                 TLRPC.TL_messages_sendMedia request = (TLRPC.TL_messages_sendMedia) message.sendRequest;
                                 ((TLRPC.TL_inputMediaPaidMedia) request.media).extended_media.remove(index);
+                            } else if (message.sendRequest instanceof TLRPC.TL_messages_sendMedia && ((TLRPC.TL_messages_sendMedia) message.sendRequest).media instanceof TLRPC.TL_inputMediaPoll) {
+                                TLRPC.TL_messages_sendMedia request = (TLRPC.TL_messages_sendMedia) message.sendRequest;
+                                PollAttachedMediaPack.removeInputMedia(((TLRPC.TL_inputMediaPoll) request.media), message.pollIndexes.get(index));
                             } else {
                                 TLRPC.TL_messages_sendEncryptedMultiMedia request = (TLRPC.TL_messages_sendEncryptedMultiMedia) message.sendEncryptedRequest;
                                 request.messages.remove(index);
@@ -2250,6 +2285,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 if (!hideCaption || newMsg.media == null) {
                     newMsg.message = msgObj.messageOwner.message;
                 }
+                if (msgObj.messageOwner.rich_message != null) {
+                    newMsg.flags2 |= TLObject.FLAG_13;
+                    newMsg.rich_message = msgObj.messageOwner.rich_message;
+                }
                 if (newMsg.message == null) {
                     newMsg.message = "";
                 }
@@ -2493,8 +2532,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                 TLRPC.Updates updates = (TLRPC.Updates) response;
                                 for (int a1 = 0; a1 < updates.updates.size(); a1++) {
                                     TLRPC.Update update = updates.updates.get(a1);
-                                    if (update instanceof TLRPC.TL_updateMessageID) {
-                                        TLRPC.TL_updateMessageID updateMessageID = (TLRPC.TL_updateMessageID) update;
+                                    if (update instanceof TL_update.TL_updateMessageID) {
+                                        TL_update.TL_updateMessageID updateMessageID = (TL_update.TL_updateMessageID) update;
                                         newMessagesByIds.put(updateMessageID.id, updateMessageID.random_id);
                                         updates.updates.remove(a1);
                                         a1--;
@@ -2510,28 +2549,28 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                 int sentCount = 0;
                                 for (int a1 = 0; a1 < updates.updates.size(); a1++) {
                                     TLRPC.Update update = updates.updates.get(a1);
-                                    if (update instanceof TLRPC.TL_updateNewMessage || update instanceof TLRPC.TL_updateNewChannelMessage || update instanceof TLRPC.TL_updateNewScheduledMessage || update instanceof TLRPC.TL_updateQuickReplyMessage) {
+                                    if (update instanceof TL_update.TL_updateNewMessage || update instanceof TL_update.TL_updateNewChannelMessage || update instanceof TL_update.TL_updateNewScheduledMessage || update instanceof TL_update.TL_updateQuickReplyMessage) {
                                         boolean currentSchedule = false;
                                         boolean scheduled = scheduleDate != 0;
 
                                         updates.updates.remove(a1);
                                         a1--;
                                         final TLRPC.Message message;
-                                        if (update instanceof TLRPC.TL_updateNewMessage) {
-                                            TLRPC.TL_updateNewMessage updateNewMessage = (TLRPC.TL_updateNewMessage) update;
+                                        if (update instanceof TL_update.TL_updateNewMessage) {
+                                            TL_update.TL_updateNewMessage updateNewMessage = (TL_update.TL_updateNewMessage) update;
                                             message = updateNewMessage.message;
                                             getMessagesController().processNewDifferenceParams(-1, updateNewMessage.pts, -1, updateNewMessage.pts_count);
                                             currentSchedule = false;
-                                        } else if (update instanceof TLRPC.TL_updateNewScheduledMessage) {
-                                            TLRPC.TL_updateNewScheduledMessage updateNewMessage = (TLRPC.TL_updateNewScheduledMessage) update;
+                                        } else if (update instanceof TL_update.TL_updateNewScheduledMessage) {
+                                            TL_update.TL_updateNewScheduledMessage updateNewMessage = (TL_update.TL_updateNewScheduledMessage) update;
                                             message = updateNewMessage.message;
                                             currentSchedule = true;
-                                        } else if (update instanceof TLRPC.TL_updateQuickReplyMessage) {
+                                        } else if (update instanceof TL_update.TL_updateQuickReplyMessage) {
                                             QuickRepliesController.getInstance(currentAccount).processUpdate(update, null, 0);
-                                            TLRPC.TL_updateQuickReplyMessage updateQuickReplyMessage = (TLRPC.TL_updateQuickReplyMessage) update;
+                                            TL_update.TL_updateQuickReplyMessage updateQuickReplyMessage = (TL_update.TL_updateQuickReplyMessage) update;
                                             message = updateQuickReplyMessage.message;
                                         } else {
-                                            TLRPC.TL_updateNewChannelMessage updateNewChannelMessage = (TLRPC.TL_updateNewChannelMessage) update;
+                                            TL_update.TL_updateNewChannelMessage updateNewChannelMessage = (TL_update.TL_updateNewChannelMessage) update;
                                             message = updateNewChannelMessage.message;
                                             getMessagesController().processNewChannelDifferenceParams(updateNewChannelMessage.pts, updateNewChannelMessage.pts_count, message.peer_id.channel_id);
                                             currentSchedule = false;
@@ -2569,7 +2608,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                                 msgObj1.messageOwner.ttl_period = message.ttl_period;
                                                 msgObj1.messageOwner.flags |= 33554432;
                                             }
-                                            updateMediaPaths(msgObj1, message, message.id, null, true);
+                                            updateMediaPaths(msgObj1, message, message.id, null, true, message.params);
                                             int existFlags = msgObj1.getMediaExistanceFlags();
                                             newMsgObj1.id = message.id;
                                             sentCount++;
@@ -2749,6 +2788,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
     }
 
     public void editMessage(MessageObject messageObject, TLRPC.TL_photo photo, VideoEditedInfo videoEditedInfo, TLRPC.TL_document document, String path, TLRPC.PhotoSize cover, HashMap<String, String> params, boolean retry, boolean hasMediaSpoilers, Object parentObject) {
+        editMessage(messageObject, null, photo, videoEditedInfo, document, path, cover, params, retry, hasMediaSpoilers, parentObject);
+    }
+
+    public void editMessage(MessageObject messageObject, TLRPC.TL_inputPollAnswer pollToAddOptionMessageObject, TLRPC.TL_photo photo, VideoEditedInfo videoEditedInfo, TLRPC.TL_document document, String path, TLRPC.PhotoSize cover, HashMap<String, String> params, boolean retry, boolean hasMediaSpoilers, Object parentObject) {
         if (messageObject == null) {
             return;
         }
@@ -2758,6 +2801,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
 
         TLRPC.Message newMsg = messageObject.messageOwner;
         messageObject.cancelEditing = false;
+
+        int pollAddingIndex = -1;
 
         try {
             int type = -1;
@@ -2816,7 +2861,64 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 params.put("prevMedia", Base64.encodeToString(prevMessageData.toByteArray(), Base64.DEFAULT));
                 prevMessageData.cleanup();
 
-                if (photo != null) {
+                if (pollToAddOptionMessageObject != null) {
+                    TLRPC.TL_messageMediaPoll messageMediaPoll = (TLRPC.TL_messageMediaPoll) newMsg.media;
+                    TLRPC.TL_pollAnswer pollAnswer = new TLRPC.TL_pollAnswer();
+                    pollAnswer.text = pollToAddOptionMessageObject.text;
+                    pollAnswer.option = pollToAddOptionMessageObject.option;
+                    pollAddingIndex = messageMediaPoll.poll.answers.size();
+                    messageMediaPoll.poll.answers.add(pollAnswer);
+
+                    messageObject.documentToPollAddOption = document;
+
+                    if (photo != null) {
+                        pollAnswer.media = new TLRPC.TL_messageMediaPhoto();
+                        pollAnswer.media.flags |= 3;
+                        pollAnswer.media.photo = photo;
+                        pollAnswer.media.spoiler = hasMediaSpoilers;
+                        type = 2;
+                        if (path != null && path.length() > 0 && path.startsWith("http")) {
+                            newMsg.attachPath = path;
+                            PollAttachedMediaPack.setAttachPath(newMsg, path, pollAddingIndex);
+                        } else {
+                            TLRPC.FileLocation location1 = photo.sizes.get(photo.sizes.size() - 1).location;
+                            newMsg.attachPath = FileLoader.getInstance(currentAccount).getPathToAttach(location1, true).toString();
+                            PollAttachedMediaPack.setAttachPath(newMsg, FileLoader.getInstance(currentAccount).getPathToAttach(location1, true).toString(), pollAddingIndex);
+                        }
+                    } else if (document != null) {
+                        pollAnswer.media = new TLRPC.TL_messageMediaDocument();
+                        pollAnswer.media.flags |= 3;
+                        pollAnswer.media.document = document;
+                        pollAnswer.media.spoiler = hasMediaSpoilers;
+                        if (MessageObject.isVideoDocument(document) || videoEditedInfo != null) {
+                            type = 3;
+                        } else {
+                            type = 7;
+                        }
+                        if (videoEditedInfo != null) {
+                            String ve = videoEditedInfo.getString();
+                            params.put("ve", ve);
+                        }
+                        newMsg.attachPath = path;
+                        PollAttachedMediaPack.setAttachPath(newMsg, path, pollAddingIndex);
+                        if (cover instanceof ImageLoader.PhotoSizeFromPhoto) {
+                            ImageLoader.PhotoSizeFromPhoto s = (ImageLoader.PhotoSizeFromPhoto) cover;
+                            pollAnswer.media.flags |= 512;
+                            pollAnswer.media.video_cover = s.photo;
+                        } else if (cover != null) {
+                            TLRPC.TL_photo coverPhoto = new TLRPC.TL_photo();
+                            coverPhoto.date = getConnectionsManager().getCurrentTime();
+                            coverPhoto.sizes.add(cover);
+                            coverPhoto.file_reference = new byte[0];
+                            pollAnswer.media.video_cover = coverPhoto;
+                            pollAnswer.media.flags |= 512;
+                        }
+                    } else if (pollToAddOptionMessageObject.input_media != null) {
+                        type = 11;
+                    } else {
+                        type = 1;
+                    }
+                } else if (photo != null) {
                     newMsg.media = new TLRPC.TL_messageMediaPhoto();
                     newMsg.media.flags |= 3;
                     newMsg.media.photo = photo;
@@ -2925,7 +3027,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         messageObject.checkLayout();
                     }
                 }
-                messageObject.createMessageSendInfo();
+                messageObject.createMessageSendInfo(pollToAddOptionMessageObject != null);
                 ArrayList<MessageObject> arrayList = new ArrayList<>();
                 arrayList.add(messageObject);
                 getNotificationCenter().postNotificationName(NotificationCenter.replaceMessagesObjects, peer, arrayList);
@@ -2938,9 +3040,11 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
 
             boolean performMediaUpload = false, performCoverUpload = false;
 
-            if (type >= 1 && type <= 3 || type >= 5 && type <= 8 || type == 10) {
+            if (type >= 1 && type <= 3 || type >= 5 && type <= 8 || type == 10 || type == 11) {
                 TLRPC.InputMedia inputMedia = null;
-                if (type == 1) {
+                if (type == 11) {
+                    inputMedia = pollToAddOptionMessageObject.input_media;
+                } else if (type == 1) {
                     if ((newMsg.media == null || newMsg.media instanceof TLRPC.TL_messageMediaEmpty || newMsg.media != null && newMsg.media.webpage instanceof TLRPC.TL_webPageEmpty) && !messageObject.editingMessageSearchWebPage) {
                         inputMedia = new TLRPC.TL_inputMediaEmpty();
                     } else if (newMsg != null && newMsg.media != null && newMsg.media.webpage != null) {
@@ -3115,53 +3219,65 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
 
                 TLObject reqSend;
 
-                TLRPC.TL_messages_editMessage request = new TLRPC.TL_messages_editMessage();
-                request.id = messageObject.getId();
-                request.peer = getMessagesController().getInputPeer(peer);
-                request.invert_media = messageObject.messageOwner.invert_media;
-                if (inputMedia != null) {
-                    request.flags |= 16384;
-                    request.media = inputMedia;
-                } else if (!messageObject.editingMessageSearchWebPage) {
-                    request.no_webpage = true;
-                }
-                if (messageObject.scheduled) {
-                    request.schedule_date = messageObject.messageOwner.date;
-                    request.flags |= 32768;
-                    if (messageObject.messageOwner.schedule_repeat_period != 0) {
-                        request.schedule_repeat_period = messageObject.messageOwner.schedule_repeat_period;
-                        request.flags |= TLObject.FLAG_18;
+                if (pollToAddOptionMessageObject != null) {
+                    final TLRPC.TL_messages_addPollAnswer req = new TLRPC.TL_messages_addPollAnswer();
+                    pollToAddOptionMessageObject.input_media = inputMedia;
+                    req.answer = pollToAddOptionMessageObject;
+                    req.msg_id = messageObject.getId();
+                    req.peer = getMessagesController().getInputPeer(peer);
+                    if (delayedMessage != null) {
+                        delayedMessage.sendRequest = req;
                     }
-                }
-                if ((messageObject.messageOwner.flags & 1073741824) != 0) {
-                    request.quick_reply_shortcut_id = messageObject.messageOwner.quick_reply_shortcut_id;
-                    request.flags |= 131072;
-                }
-                if (messageObject.editingMessage != null) {
-                    request.message = messageObject.editingMessage.toString();
-                    request.flags |= 2048;
-                    request.no_webpage = !messageObject.editingMessageSearchWebPage;
-                    if (messageObject.editingMessageEntities != null) {
-                        request.entities = messageObject.editingMessageEntities;
-                        request.flags |= 8;
-                    } else {
-                        CharSequence[] message = new CharSequence[]{messageObject.editingMessage};
-                        ArrayList<TLRPC.MessageEntity> entities = getMediaDataController().getEntities(message, supportsSendingNewEntities);
-                        if (entities != null && !entities.isEmpty()) {
-                            request.entities = entities;
-                            request.flags |= 8;
+                    reqSend = req;
+                } else {
+                    TLRPC.TL_messages_editMessage request = new TLRPC.TL_messages_editMessage();
+                    request.id = messageObject.getId();
+                    request.peer = getMessagesController().getInputPeer(peer);
+                    request.invert_media = messageObject.messageOwner.invert_media;
+                    if (inputMedia != null) {
+                        request.flags |= 16384;
+                        request.media = inputMedia;
+                    } else if (!messageObject.editingMessageSearchWebPage) {
+                        request.no_webpage = true;
+                    }
+                    if (messageObject.scheduled) {
+                        request.schedule_date = messageObject.messageOwner.date;
+                        request.flags |= 32768;
+                        if (messageObject.messageOwner.schedule_repeat_period != 0) {
+                            request.schedule_repeat_period = messageObject.messageOwner.schedule_repeat_period;
+                            request.flags |= TLObject.FLAG_18;
                         }
                     }
-                    messageObject.editingMessage = null;
-                    messageObject.editingMessageEntities = null;
+                    if ((messageObject.messageOwner.flags & 1073741824) != 0) {
+                        request.quick_reply_shortcut_id = messageObject.messageOwner.quick_reply_shortcut_id;
+                        request.flags |= 131072;
+                    }
+                    if (messageObject.editingMessage != null) {
+                        request.message = messageObject.editingMessage.toString();
+                        request.flags |= 2048;
+                        request.no_webpage = !messageObject.editingMessageSearchWebPage;
+                        if (messageObject.editingMessageEntities != null) {
+                            request.entities = messageObject.editingMessageEntities;
+                            request.flags |= 8;
+                        } else {
+                            CharSequence[] message = new CharSequence[]{messageObject.editingMessage};
+                            ArrayList<TLRPC.MessageEntity> entities = getMediaDataController().getEntities(message, supportsSendingNewEntities);
+                            if (entities != null && !entities.isEmpty()) {
+                                request.entities = entities;
+                                request.flags |= 8;
+                            }
+                        }
+                        messageObject.editingMessage = null;
+                        messageObject.editingMessageEntities = null;
+                    }
+
+                    if (delayedMessage != null) {
+                        delayedMessage.sendRequest = request;
+                    }
+                    reqSend = request;
                 }
 
-                if (delayedMessage != null) {
-                    delayedMessage.sendRequest = request;
-                }
-                reqSend = request;
-
-                if (type == 1) {
+                if (type == 1 || type == 11) {
                     performSendMessageRequest(reqSend, messageObject, null, delayedMessage, parentObject, params, messageObject.scheduled);
                 } else if (type == 2) {
                     if (performMediaUpload || performCoverUpload) {
@@ -3328,6 +3444,88 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         }
         final String key = "poll_" + messageObject.getPollId();
         return waitingForVote.get(key);
+    }
+
+    public void deletePollOption(MessageObject messageObject, byte[] option) {
+        if (messageObject == null) {
+            return;
+        }
+
+        final TLRPC.MessageMedia m = MessageObject.getMedia(messageObject);
+        if (!(m instanceof TLRPC.TL_messageMediaPoll)) {
+            return;
+        }
+
+        final long peer = messageObject.getDialogId();
+        final int messageId = messageObject.getId();
+
+        TLRPC.TL_messages_deletePollAnswer req = new TLRPC.TL_messages_deletePollAnswer();
+        req.peer = getMessagesController().getInputPeer(peer);
+        req.msg_id = messageId;
+        req.option = option;
+
+        getConnectionsManager().sendRequestTyped(req, Utilities.stageQueue::postRunnable, (updates, err) -> {
+            if (updates != null) {
+                getMessagesController().processUpdates(updates, false);
+            }
+            if (err != null) {
+                // todo
+            }
+        });
+    }
+
+    public void addPollOption(MessageObject messageObject, CharSequence caption, PollAttachedMedia attachedMedia) {
+        if (messageObject == null) {
+            return;
+        }
+
+        final TLRPC.MessageMedia m = MessageObject.getMedia(messageObject);
+        if (!(m instanceof TLRPC.TL_messageMediaPoll)) {
+            return;
+        }
+
+        final TLRPC.TL_messageMediaPoll media = (TLRPC.TL_messageMediaPoll) m;
+        final long peer = messageObject.getDialogId();
+
+        TLRPC.TL_inputPollAnswer inputPollAnswer = new TLRPC.TL_inputPollAnswer();
+        inputPollAnswer.text = new TLRPC.TL_textWithEntities();
+        inputPollAnswer.option = new byte[1];
+        inputPollAnswer.option[0] = (byte) (48 + media.poll.answers.size());
+        if (caption != null) {
+            CharSequence[] message = new CharSequence[]{caption};
+            inputPollAnswer.text.entities = getMediaDataController().getEntities(message, true);
+            inputPollAnswer.text.text = message[0].toString();
+            if (Config.enablePanguOnSending) {
+                inputPollAnswer.text = StringUtils.spacingText(inputPollAnswer.text);
+            }
+        }
+
+        if (attachedMedia instanceof PollAttachedMediaGallery) {
+            PollAttachedMediaGallery pollAttachedMediaGallery = (PollAttachedMediaGallery) attachedMedia;
+            ArrayList<SendingMediaInfo> infos = new ArrayList<>(1);
+            infos.add(pollAttachedMediaGallery.sendingMediaInfo);
+            prepareSendingMedia(getAccountInstance(), infos, peer, null, null,
+                    null, null, false, false, messageObject,
+                    inputPollAnswer,
+                    false, 0, 0, 0, false,
+                    null, null, 0, 0,
+                    false, 0, 0, null);
+        } else if (attachedMedia instanceof PollAttachedMediaSticker) {
+            PollAttachedMediaSticker s = (PollAttachedMediaSticker) attachedMedia;
+            editMessage(messageObject, inputPollAnswer, null, null, (TLRPC.TL_document) s.sticker, null, null, null, false, false, s.parent);
+        } else if (attachedMedia instanceof PollAttachedMediaLocation) {
+            PollAttachedMediaLocation location = (PollAttachedMediaLocation) attachedMedia;
+            inputPollAnswer.input_media = TlUtils.toInputMediaGeo(location.media);
+            editMessage(messageObject, inputPollAnswer, null, null, null, null, null, null, false, false, null);
+        } else if (attachedMedia instanceof PollAttachedMediaLink) {
+            TLRPC.TL_inputMediaWebPage inputMediaWebPage = new TLRPC.TL_inputMediaWebPage();
+            inputMediaWebPage.url = ((PollAttachedMediaLink) attachedMedia).url;
+            inputMediaWebPage.optional = true;
+            inputPollAnswer.input_media = inputMediaWebPage;
+            editMessage(messageObject, inputPollAnswer, null, null, null, null, null, null, false, false, null);
+        } else {
+            editMessage(messageObject, inputPollAnswer, null, null, null, null, null, null, false, false, null);
+        }
     }
 
     public int sendVote(final MessageObject messageObject, final ArrayList<TLRPC.PollAnswer> answers, final Runnable finishRunnable) {
@@ -3889,6 +4087,9 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         String quick_reply_shortcut = sendMessageParams.quick_reply_shortcut;
         int quick_reply_shortcut_id = sendMessageParams.quick_reply_shortcut_id;
         long stars = sendMessageParams.stars;
+        int pollIndex = sendMessageParams.pollIndex;
+        PollSendParams pollSendParams = sendMessageParams.pollSendParams;
+        TL_iv.TL_inputRichMessage inputRichMessage = sendMessageParams.inputRichMessage;
 
         if (user != null && user.phone == null) {
             return;
@@ -3896,7 +4097,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         if (peer == 0) {
             return;
         }
-        if (message == null && caption == null) {
+        if (inputRichMessage != null && DialogObject.isEncryptedDialog(peer)) {
+            return;
+        }
+        if (message == null && caption == null && inputRichMessage == null) {
             caption = "";
         }
 
@@ -3964,6 +4168,13 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
             if (needMonoForumPeer != (sendMessageParams.monoForumPeer != 0)) {
                 Log.w("DEBUG", "Warning: monoForumPeer: " + sendMessageParams.monoForumPeer);
             }
+        }
+
+        if (poll == null && pollSendParams != null) {
+            if (params == null) {
+                params = new HashMap<>();
+            }
+            params.put("pollMediaIndex", Integer.toString(pollIndex));
         }
 
         try {
@@ -4056,7 +4267,13 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     TLRPC.Chat chat = getMessagesController().getChat(-peer);
                     canSendStickers = ChatObject.canSendStickers(chat);
                 }
-                if (message != null) {
+                if (inputRichMessage != null) {
+                    newMsg = new TLRPC.TL_message();
+                    newMsg.media = new TLRPC.TL_messageMediaEmpty();
+                    newMsg.message = "";
+                    newMsg.rich_message = inputRichMessageToRichMessage(inputRichMessage);
+                    type = MEDIA_TYPE_RICH;
+                } else if (message != null) {
                     if (encryptedChat != null) {
                         newMsg = new TLRPC.TL_message_secret();
                     } else {
@@ -4101,11 +4318,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         newMsg = new TLRPC.TL_message();
                     }
 
-                    if (poll.poll != null && Config.enablePanguOnSending) {
-                        poll.poll.question = StringUtils.spacingText(poll.poll.question);
-                        for (int i = 0; i < poll.poll.answers.size(); i++) {
-                            poll.poll.answers.get(i).text = StringUtils.spacingText(poll.poll.answers.get(i).text);
-                        }
+                    if (pollSendParams == null && poll.poll != null && Config.enablePanguOnSending) {
+                        StringUtils.spacingPoll(poll.poll);
                     }
 
                     newMsg.media = poll;
@@ -4612,7 +4826,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 isFinalGroupMedia = params.get("final") != null;
             }
 
-            if (!((params != null && params.containsKey("fwd_id")) || MessageObject.isForwardedMessage(newMsg)) && Config.enablePanguOnSending) {
+            if (pollSendParams == null && !((params != null && params.containsKey("fwd_id")) || MessageObject.isForwardedMessage(newMsg)) && Config.enablePanguOnSending) {
                 Pair<String, ArrayList<MessageEntity>> pair;
                 if (caption != null) {
                     pair = StringUtils.spacingText(caption, entities);
@@ -4636,6 +4850,18 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 extMedia.media = media;
                 paidMedia.extended_media.add(extMedia);
                 newMsg.media = paidMedia;
+            }
+            if (pollSendParams != null) {
+                if (newMsg.media != null && !(newMsg.media instanceof TLRPC.TL_messageMediaPoll)) {
+                    PollAttachedMediaPack.setMessageMedia(pollSendParams.poll, pollIndex, newMsg.media);
+                }
+                PollAttachedMediaPack.setAttachPath(newMsg, newMsg.attachPath, pollIndex);
+                newMsg.media = pollSendParams.poll;
+                newMsg.message = pollSendParams.caption;
+                if (pollSendParams.entities != null && !pollSendParams.entities.isEmpty()) {
+                    newMsg.entities = pollSendParams.entities;
+                    newMsg.flags |= TLRPC.MESSAGE_FLAG_HAS_ENTITIES;
+                }
             }
             if (sendMessageParams.monoForumPeer != 0) {
                 newMsg.saved_peer_id = getMessagesController().getPeer(sendMessageParams.monoForumPeer);
@@ -4874,6 +5100,57 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     if (retryMessageObject == null) {
                         getMediaDataController().cleanDraft(peer, replyToTopMsg != null ? replyToTopMsg.getId() : 0, false);
                     }
+                }
+            } else if (type == MEDIA_TYPE_RICH) {
+                final TLRPC.TL_messages_sendMessage reqSend = new TLRPC.TL_messages_sendMessage();
+                reqSend.message = "";
+                reqSend.clear_draft = retryMessageObject == null;
+                reqSend.silent = newMsg.silent;
+                reqSend.peer = sendToPeer;
+                reqSend.random_id = newMsg.random_id;
+                reqSend.no_webpage = true;
+                reqSend.rich_message = inputRichMessage;
+                if (payStars > 0) {
+                    reqSend.flags |= 2097152;
+                    reqSend.allow_paid_stars = payStars;
+                }
+                if (replyToStoryItem != null) {
+                    reqSend.reply_to = createReplyInput(replyToStoryItem);
+                    reqSend.flags |= 1;
+                } else if (newMsg.reply_to instanceof TLRPC.TL_messageReplyHeader) {
+                    reqSend.reply_to = createReplyInput((TLRPC.TL_messageReplyHeader) newMsg.reply_to);
+                    reqSend.flags |= 1;
+                }
+                if (newMsg.quick_reply_shortcut != null) {
+                    reqSend.flags |= 131072;
+                    reqSend.quick_reply_shortcut = newMsg.quick_reply_shortcut;
+                }
+                if (newMsg.from_id != null) {
+                    reqSend.send_as = getMessagesController().getInputPeer(newMsg.from_id);
+                }
+                if (scheduleDate != 0) {
+                    reqSend.schedule_date = scheduleDate;
+                    reqSend.flags |= 1024;
+                    if (scheduleRepeatPeriod != 0) {
+                        reqSend.flags |= TLObject.FLAG_24;
+                        reqSend.schedule_repeat_period = scheduleRepeatPeriod;
+                    }
+                }
+                if (sendMessageParams.effect_id != 0) {
+                    reqSend.flags |= 262144;
+                    reqSend.effect = sendMessageParams.effect_id;
+                }
+                if (sendMessageParams.suggestionParams != null) {
+                    reqSend.suggested_post = sendMessageParams.suggestionParams.toTl();
+                }
+                reqSend.invert_media = newMsg.invert_media;
+                applyMonoForumPeerId(reqSend, sendMessageParams.monoForumPeer);
+                if (retryMessageObject == null) {
+                    StarsController.getInstance(currentAccount).beforeSendingMessage(newMsgObj);
+                }
+                performSendMessageRequest(reqSend, newMsgObj, null, null, parentObject, params, scheduleDate != 0);
+                if (retryMessageObject == null) {
+                    getMediaDataController().cleanDraft(peer, replyToTopMsg != null ? replyToTopMsg.getId() : 0, false);
                 }
             } else if (type >= 1 && type <= 3 || type >= 5 && type <= 8 || type == 9 && encryptedChat != null || type == 10 || type == MEDIA_TYPE_DICE || type == MEDIA_TYPE_STORY) {
                 if (encryptedChat == null) {
@@ -5139,15 +5416,20 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             inputMediaTodo.todo = todo.todo;
                             inputMedia = inputMediaTodo;
                         } else {
-                            TLRPC.TL_inputMediaPoll inputMediaPoll = new TLRPC.TL_inputMediaPoll();
-                            inputMediaPoll.poll = poll.poll;
-                            if (params != null && params.containsKey("answers")) {
-                                byte[] answers = Utilities.hexToBytes(params.get("answers"));
-                                if (answers.length > 0) {
-                                    for (int a = 0; a < answers.length; a++) {
-                                        inputMediaPoll.correct_answers.add(answers[a] - 48);
+                            TLRPC.TL_inputMediaPoll inputMediaPoll;
+                            if (pollSendParams != null) {
+                                inputMediaPoll = pollSendParams.inputMediaPoll;
+                            } else {
+                                inputMediaPoll = new TLRPC.TL_inputMediaPoll();
+                                inputMediaPoll.poll = poll.poll;
+                                if (params != null && params.containsKey("answers")) {
+                                    byte[] answers = Utilities.hexToBytes(params.get("answers"));
+                                    if (answers.length > 0) {
+                                        for (int a = 0; a < answers.length; a++) {
+                                            inputMediaPoll.correct_answers.add(answers[a] - 48);
+                                        }
+                                        inputMediaPoll.flags |= 1;
                                     }
-                                    inputMediaPoll.flags |= 1;
                                 }
                             }
                             if (poll.results != null && !TextUtils.isEmpty(poll.results.solution)) {
@@ -5180,6 +5462,54 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         TLObject request;
                         if (delayedMessage.sendRequest != null) {
                             request = delayedMessage.sendRequest;
+                        } else if (pollSendParams != null) {
+                            TLRPC.TL_messages_sendMedia req = new TLRPC.TL_messages_sendMedia();
+                            req.peer = sendToPeer;
+                            req.silent = newMsg.silent;
+                            req.message = pollSendParams.caption;
+                            if (pollSendParams.entities != null && !pollSendParams.entities.isEmpty()) {
+                                req.entities = pollSendParams.entities;
+                                req.flags |= 8;
+                            }
+                            if (payStars > 0) {
+                                req.flags |= 2097152;
+                                req.allow_paid_stars = payStars;
+                            }
+                            if (newMsg.replyStory != null) {
+                                req.flags |= 1;
+                                req.reply_to = createReplyInput(replyToStoryItem);
+                            } else if (newMsg.reply_to instanceof TLRPC.TL_messageReplyHeader) {
+                                req.flags |= 1;
+                                req.reply_to = createReplyInput((TLRPC.TL_messageReplyHeader) newMsg.reply_to);
+                            }
+                            if (scheduleDate != 0) {
+                                req.schedule_date = scheduleDate;
+                                req.flags |= 1024;
+                                if (scheduleRepeatPeriod != 0) {
+                                    req.flags |= TLObject.FLAG_24;
+                                    req.schedule_repeat_period = scheduleRepeatPeriod;
+                                }
+                            }
+                            if (newMsg.quick_reply_shortcut != null) {
+                                req.quick_reply_shortcut = newMsg.quick_reply_shortcut;
+                                req.flags |= 131072;
+                            }
+                            if (newMsg.effect != 0) {
+                                req.flags |= 262144;
+                                req.effect = newMsg.effect;
+                            }
+                            req.invert_media = sendMessageParams.invert_media;
+                            req.random_id = newMsg.random_id;
+                            req.media = pollSendParams.inputMediaPoll;
+                            applyMonoForumPeerId(req, sendMessageParams.monoForumPeer);
+                            if (sendMessageParams.suggestionParams != null) {
+                                req.suggested_post = sendMessageParams.suggestionParams.toTl();
+                            } else if (retryMessageObject != null && retryMessageObject.messageOwner != null && retryMessageObject.messageOwner.suggested_post != null) {
+                                req.suggested_post = retryMessageObject.messageOwner.suggested_post;
+                            }
+                            request = req;
+                            delayedMessage.pollMedia = true;
+                            delayedMessage.sendRequest = request;
                         } else if (stars > 0) {
                             TLRPC.TL_messages_sendMedia req = new TLRPC.TL_messages_sendMedia();
                             req.peer = sendToPeer;
@@ -5276,6 +5606,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                 firstMessage.media.extended_media.add(extMedia);
                             }
                         }
+                        if (delayedMessage.pollMedia && !delayedMessage.messages.isEmpty()) {
+                            TLRPC.Message firstMessage = delayedMessage.messages.get(0);
+                            PollAttachedMediaPack.setAttachPath(firstMessage, newMsg.attachPath, pollIndex);
+                        }
                         delayedMessage.messageObjects.add(newMsgObj);
                         delayedMessage.messages.add(newMsg);
                         delayedMessage.parentObjects.add(parentObject);
@@ -5284,6 +5618,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         delayedMessage.httpLocations.add(delayedMessage.httpLocation);
                         delayedMessage.inputMedias.add(delayedMessage.inputUploadMedia);
                         delayedMessage.originalPaths.add(originalPath);
+                        delayedMessage.pollIndexes.add(pollIndex);
                         if (request instanceof TLRPC.TL_messages_sendMultiMedia) {
                             TLRPC.TL_inputSingleMedia inputSingleMedia = new TLRPC.TL_inputSingleMedia();
                             inputSingleMedia.random_id = newMsg.random_id;
@@ -5300,6 +5635,9 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             }
                         } else if (request instanceof TLRPC.TL_messages_sendMedia && ((TLRPC.TL_messages_sendMedia) request).media instanceof TLRPC.TL_inputMediaPaidMedia) {
                             ((TLRPC.TL_inputMediaPaidMedia) ((TLRPC.TL_messages_sendMedia) request).media).extended_media.add(inputMedia);
+                        } else if (request instanceof TLRPC.TL_messages_sendMedia && ((TLRPC.TL_messages_sendMedia) request).media instanceof TLRPC.TL_inputMediaPoll) {
+                            TLRPC.TL_inputMediaPoll inputMediaPoll = (TLRPC.TL_inputMediaPoll) ((TLRPC.TL_messages_sendMedia) request).media;
+                            PollAttachedMediaPack.setInputMedia(inputMediaPoll, pollIndex, inputMedia);
                         }
                         reqSend = request;
                     } else {
@@ -5873,6 +6211,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         TLRPC.InputMedia media;
                         if (message.sendRequest instanceof TLRPC.TL_messages_sendMedia) {
                             media = ((TLRPC.TL_messages_sendMedia) message.sendRequest).media;
+                        } else if (message.sendRequest instanceof TLRPC.TL_messages_addPollAnswer) {
+                            media = ((TLRPC.TL_messages_addPollAnswer) message.sendRequest).answer.input_media;
                         } else {
                             media = ((TLRPC.TL_messages_editMessage) message.sendRequest).media;
                         }
@@ -5895,6 +6235,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         final TLRPC.TL_messages_sendMedia req = (TLRPC.TL_messages_sendMedia) message.sendRequest;
                         media = req.media;
                         peer = req.peer;
+                    } else if (message.sendRequest instanceof TLRPC.TL_messages_addPollAnswer) {
+                        final TLRPC.TL_messages_addPollAnswer req = (TLRPC.TL_messages_addPollAnswer) message.sendRequest;
+                        media = req.answer.input_media;
+                        peer = req.peer;
                     } else {
                         final TLRPC.TL_messages_editMessage req = (TLRPC.TL_messages_editMessage) message.sendRequest;
                         media = req.media;
@@ -5903,10 +6247,19 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     if (media instanceof TLRPC.TL_inputMediaPaidMedia && !((TLRPC.TL_inputMediaPaidMedia) media).extended_media.isEmpty()) {
                         media = ((TLRPC.TL_inputMediaPaidMedia) media).extended_media.get(0);
                     }
+                    if (media instanceof TLRPC.TL_inputMediaPoll) {
+                        TLRPC.InputMedia inputMedia = PollAttachedMediaPack.getFirstInputMedia((TLRPC.TL_inputMediaPoll) media);
+                        if (inputMedia != null) {
+                            media = inputMedia;
+                        }
+                    }
                     final TLRPC.InputMedia finalMedia = media;
                     if (media.file == null && !(media instanceof TLRPC.TL_inputMediaDocument) && message.performMediaUpload) {
                         String location = message.obj.messageOwner.attachPath;
                         TLRPC.Document document = message.obj.getDocument();
+                        if (message.obj.documentToPollAddOption != null) {
+                            document = message.obj.documentToPollAddOption;
+                        }
                         if (location == null) {
                             location = FileLoader.getDirectory(FileLoader.MEDIA_DIR_CACHE) + "/" + document.id + ".mp4";
                         }
@@ -6016,6 +6369,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     TLRPC.InputMedia media;
                     if (message.sendRequest instanceof TLRPC.TL_messages_sendMedia) {
                         media = ((TLRPC.TL_messages_sendMedia) message.sendRequest).media;
+                    } else if (message.sendRequest instanceof TLRPC.TL_messages_addPollAnswer) {
+                        media = ((TLRPC.TL_messages_addPollAnswer) message.sendRequest).answer.input_media;
                     } else {
                         media = ((TLRPC.TL_messages_editMessage) message.sendRequest).media;
                     }
@@ -6081,6 +6436,11 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     TLRPC.MessageMedia media = emedia instanceof TLRPC.TL_messageExtendedMedia ? ((TLRPC.TL_messageExtendedMedia) emedia).media : null;
                     document = media == null ? null : media.document;
                 }
+                if (document == null && MessageObject.getMedia(messageObject) instanceof TLRPC.TL_messageMediaPoll) {
+                    TLRPC.TL_messageMediaPoll pollMedia = (TLRPC.TL_messageMediaPoll) MessageObject.getMedia(messageObject);
+                    TLRPC.MessageMedia media = PollAttachedMediaPack.getMedia(pollMedia, message.pollIndexes.get(index));
+                    document = media == null ? null : media.document;
+                }
                 if (document != null) {
                     if (message.videoEditedInfo != null && message.videoEditedInfo.needConvert() && message.performMediaUpload) {
                         String location = messageObject.messageOwner.attachPath;
@@ -6118,6 +6478,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                 peer = request.peer;
                                 if (request.media instanceof TLRPC.TL_inputMediaPaidMedia) {
                                     media = ((TLRPC.TL_inputMediaPaidMedia) request.media).extended_media.get(index);
+                                } else if (request.media instanceof TLRPC.TL_inputMediaPoll) {
+                                    media = PollAttachedMediaPack.getInputMedia(((TLRPC.TL_inputMediaPoll) request.media), message.pollIndexes.get(index));
                                 }
                             }
                             if (media != null && media.file == null && !(media instanceof TLRPC.TL_inputMediaDocument) && message.performMediaUpload) {
@@ -6139,7 +6501,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                     getFileLoader().uploadFile(documentLocation, false, false, ConnectionsManager.FileTypeVideo);
                                 }
                                 putToUploadingMessages(messageObject);
-                            } else if (message.coverPhotoSize != null && message.coverFile == null && media.video_cover == null) {
+                            } else if (message.coverPhotoSize != null && message.coverFile == null && media != null && media.video_cover == null) {
                                 String location = FileLoader.getDirectory(FileLoader.MEDIA_DIR_CACHE) + "/" + message.coverPhotoSize.location.volume_id + "_" + message.coverPhotoSize.location.local_id + ".jpg";
                                 putToDelayedMessages(location, message);
                                 if (message.coverPhotoSize != null && message.coverPhotoSize.location != null) {
@@ -6243,6 +6605,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             inputMedia = request.multi_media.get(index).media;
                         } else if (message.sendRequest instanceof TLRPC.TL_messages_sendMedia && ((TLRPC.TL_messages_sendMedia) message.sendRequest).media instanceof TLRPC.TL_inputMediaPaidMedia) {
                             inputMedia = ((TLRPC.TL_inputMediaPaidMedia) ((TLRPC.TL_messages_sendMedia) message.sendRequest).media).extended_media.get(index);
+                        } else if (message.sendRequest instanceof TLRPC.TL_messages_sendMedia && ((TLRPC.TL_messages_sendMedia) message.sendRequest).media instanceof TLRPC.TL_inputMediaPoll) {
+                            inputMedia = PollAttachedMediaPack.getInputMedia(((TLRPC.TL_inputMediaPoll) ((TLRPC.TL_messages_sendMedia) message.sendRequest).media), message.pollIndexes.get(index));
                         } else {
                             TLRPC.TL_messages_sendEncryptedMultiMedia request = (TLRPC.TL_messages_sendEncryptedMultiMedia) message.sendEncryptedRequest;
                             inputMedia = request.files.get(index);
@@ -6316,6 +6680,18 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         break;
                     }
                 }
+            } else if (message.sendRequest instanceof TLRPC.TL_messages_sendMedia && ((TLRPC.TL_messages_sendMedia) message.sendRequest).media instanceof TLRPC.TL_inputMediaPoll) {
+                TLRPC.TL_messages_sendMedia sendMedia = (TLRPC.TL_messages_sendMedia) message.sendRequest;
+                req.peer = sendMedia.peer;
+                TLRPC.TL_inputMediaPoll multiMedia = (TLRPC.TL_inputMediaPoll) sendMedia.media;
+                final int mediaPackIndex = PollAttachedMediaPack.findInputMedia(multiMedia, inputMedia);
+                for (int a = 0; a < message.pollIndexes.size(); a++) {
+                    if (message.pollIndexes.get(a) == mediaPackIndex) {
+                        putToSendingMessages(message.messages.get(a), message.scheduled);
+                        getNotificationCenter().postNotificationName(NotificationCenter.fileUploadProgressChanged, key, -1L, -1L, false);
+                        break;
+                    }
+                }
             }
             getConnectionsManager().sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
                 TLRPC.InputMedia newInputMedia = null;
@@ -6376,6 +6752,12 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                 break;
                             }
                         }
+                    } else if (message.sendRequest instanceof TLRPC.TL_messages_sendMedia && ((TLRPC.TL_messages_sendMedia) message.sendRequest).media instanceof TLRPC.TL_inputMediaPoll) {
+                        TLRPC.TL_messages_sendMedia req1 = (TLRPC.TL_messages_sendMedia) message.sendRequest;
+                        TLRPC.TL_inputMediaPoll media = (TLRPC.TL_inputMediaPoll) req1.media;
+
+                        final int mediaPackIndex = PollAttachedMediaPack.findInputMedia(media, inputMedia);
+                        PollAttachedMediaPack.setInputMedia(media, mediaPackIndex, newInputMedia);
                     }
                     sendReadyToSendGroup(message, false, true);
                 } else {
@@ -6426,7 +6808,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
             } else {
                 mode = ChatActivity.MODE_DEFAULT;
             }
-            if (message.paidMedia) {
+            if (message.paidMedia || message.pollMedia) {
                 ArrayList<MessageObject> firstMessageObject = new ArrayList<>();
                 firstMessageObject.add(message.messageObjects.get(0));
                 ArrayList<TLRPC.Message> firstMessage = new ArrayList<>();
@@ -6468,6 +6850,29 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         return;
                     }
                 }
+            }
+
+            if (check) {
+                DelayedMessage maxDelayedMessage = findMaxDelayedMessageForMessageId(message.finalGroupMessage, message.peer);
+                if (maxDelayedMessage != null) {
+                    maxDelayedMessage.addDelayedRequest(message.sendRequest, message.messageObjects, message.originalPaths, message.parentObjects, message, message.scheduled);
+                    if (message.requests != null) {
+                        maxDelayedMessage.requests.addAll(message.requests);
+                    }
+                    if (BuildVars.DEBUG_VERSION) {
+                        FileLog.d("has maxDelayedMessage, delay");
+                    }
+                    return;
+                }
+            }
+        } else if (message.sendRequest instanceof TLRPC.TL_messages_sendMedia && ((TLRPC.TL_messages_sendMedia) message.sendRequest).media instanceof TLRPC.TL_inputMediaPoll) {
+            TLRPC.TL_messages_sendMedia request = (TLRPC.TL_messages_sendMedia) message.sendRequest;
+            TLRPC.TL_inputMediaPoll media = (TLRPC.TL_inputMediaPoll) request.media;
+            if (PollAttachedMediaPack.hasWrongInputMediaTypes(media)) {
+                if (BuildVars.DEBUG_VERSION) {
+                    FileLog.d("multi media not ready");
+                }
+                return;
             }
 
             if (check) {
@@ -6775,20 +7180,20 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     boolean currentSchedule = scheduled;
                     for (int a = 0; a < updatesArr.size(); a++) {
                         TLRPC.Update update = updatesArr.get(a);
-                        if (update instanceof TLRPC.TL_updateMessageID) {
-                            TLRPC.TL_updateMessageID updateMessageID = (TLRPC.TL_updateMessageID) update;
+                        if (update instanceof TL_update.TL_updateMessageID) {
+                            TL_update.TL_updateMessageID updateMessageID = (TL_update.TL_updateMessageID) update;
                             newIds.put(updateMessageID.random_id, updateMessageID.id);
                             updatesArr.remove(a);
                             a--;
-                        } else if (update instanceof TLRPC.TL_updateNewMessage) {
+                        } else if (update instanceof TL_update.TL_updateNewMessage) {
                             currentSchedule = false;
-                            final TLRPC.TL_updateNewMessage newMessage = (TLRPC.TL_updateNewMessage) update;
+                            final TL_update.TL_updateNewMessage newMessage = (TL_update.TL_updateNewMessage) update;
                             newMessages.put(newMessage.message.id, newMessage.message);
                             Utilities.stageQueue.postRunnable(() -> getMessagesController().processNewDifferenceParams(-1, newMessage.pts, -1, newMessage.pts_count));
                             updatesArr.remove(a);
                             a--;
-                        } else if (update instanceof TLRPC.TL_updateNewChannelMessage) {
-                            final TLRPC.TL_updateNewChannelMessage newMessage = (TLRPC.TL_updateNewChannelMessage) update;
+                        } else if (update instanceof TL_update.TL_updateNewChannelMessage) {
+                            final TL_update.TL_updateNewChannelMessage newMessage = (TL_update.TL_updateNewChannelMessage) update;
                             long channelId = MessagesController.getUpdateChannelId(newMessage);
                             TLRPC.Chat chat = getMessagesController().getChat(channelId);
                             if ((chat == null || chat.megagroup) && newMessage.message.reply_to != null && (newMessage.message.reply_to.reply_to_top_id != 0 || newMessage.message.reply_to.reply_to_msg_id != 0)) {
@@ -6824,16 +7229,16 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                     getMessagesStorage().updatePinnedMessages(-channelId, mids, true, -1, 0, false, null);
                                 });
                             }
-                        } else if (update instanceof TLRPC.TL_updateNewScheduledMessage) {
+                        } else if (update instanceof TL_update.TL_updateNewScheduledMessage) {
                             currentSchedule = true;
-                            final TLRPC.TL_updateNewScheduledMessage newMessage = (TLRPC.TL_updateNewScheduledMessage) update;
+                            final TL_update.TL_updateNewScheduledMessage newMessage = (TL_update.TL_updateNewScheduledMessage) update;
                             newMessages.put(newMessage.message.id, newMessage.message);
                             updatesArr.remove(a);
                             a--;
-                        } else if (update instanceof TLRPC.TL_updateQuickReplyMessage) {
+                        } else if (update instanceof TL_update.TL_updateQuickReplyMessage) {
                             currentSchedule = false;
                             QuickRepliesController.getInstance(currentAccount).processUpdate(update, msgObjs.isEmpty() ? null : msgObjs.get(0).getQuickReplyName(), msgObjs.isEmpty() ? null : msgObjs.get(0).getQuickReplyId());
-                            final TLRPC.TL_updateQuickReplyMessage newMessage = (TLRPC.TL_updateQuickReplyMessage) update;
+                            final TL_update.TL_updateQuickReplyMessage newMessage = (TL_update.TL_updateQuickReplyMessage) update;
                             newMessages.put(newMessage.message.id, newMessage.message);
                             updatesArr.remove(a);
                             a--;
@@ -6870,9 +7275,9 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                     msgObj.messageOwner.flags |= 33554432;
                                 }
                                 if (request instanceof TLRPC.TL_messages_sendMedia) { // paid media
-                                    updateMediaPaths(msgObjs.get(0), message, message.id, originalPaths, false, -1);
+                                    updateMediaPaths(msgObjs.get(0), message, message.id, originalPaths, false, -1, message.params);
                                 } else {
-                                    updateMediaPaths(msgObj, message, message.id, originalPath, false);
+                                    updateMediaPaths(msgObj, message, message.id, originalPath, false, message.params);
                                 }
                                 existFlags = msgObj.getMediaExistanceFlags();
                                 newMsgObj.id = message.id;
@@ -6990,6 +7395,47 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
     }
 
     protected void performSendMessageRequest(final TLObject req, final MessageObject msgObj, final String originalPath, DelayedMessage parentMessage, boolean check, DelayedMessage delayedMessage, Object parentObject, HashMap<String, String> params, boolean scheduled) {
+        if (req instanceof TLRPC.TL_messages_addPollAnswer) {
+            TLRPC.TL_messages_addPollAnswer r = (TLRPC.TL_messages_addPollAnswer) req;
+            if (r.answer.input_media instanceof TLRPC.TL_inputMediaUploadedDocument || r.answer.input_media instanceof TLRPC.TL_inputMediaUploadedPhoto) {
+                final TLRPC.TL_messages_uploadMedia req2 = new TLRPC.TL_messages_uploadMedia();
+                req2.peer = r.peer;
+                req2.media = r.answer.input_media;
+                getConnectionsManager().sendRequest(req2, (res, err) -> AndroidUtilities.runOnUIThread(() -> {
+                    if (res instanceof TLRPC.TL_messageMediaDocument) {
+                        final TLRPC.TL_messageMediaDocument mediaDocument = (TLRPC.TL_messageMediaDocument) res;
+                        final TLRPC.Document document = mediaDocument.document;
+                        final TLRPC.TL_inputDocument inputDocument = new TLRPC.TL_inputDocument();
+                        inputDocument.id = document.id;
+                        inputDocument.access_hash = document.access_hash;
+                        inputDocument.file_reference = document.file_reference;
+
+                        TLRPC.TL_inputMediaDocument inputMediaDocument = new TLRPC.TL_inputMediaDocument();
+                        inputMediaDocument.id = inputDocument;
+                        r.answer.input_media = inputMediaDocument;
+
+                        performSendMessageRequest(req, msgObj, originalPath, parentMessage, check, delayedMessage, parentObject, params, scheduled);
+                    } else if (res instanceof TLRPC.TL_messageMediaPhoto) {
+                        final TLRPC.TL_messageMediaPhoto mediaPhoto = (TLRPC.TL_messageMediaPhoto) res;
+                        final TLRPC.Photo photo = mediaPhoto.photo;
+                        final TLRPC.TL_inputPhoto inputPhoto = new TLRPC.TL_inputPhoto();
+                        inputPhoto.id = photo.id;
+                        inputPhoto.access_hash = photo.access_hash;
+                        inputPhoto.file_reference = photo.file_reference;
+
+                        TLRPC.TL_inputMediaPhoto inputMediaPhoto = new TLRPC.TL_inputMediaPhoto();
+                        inputMediaPhoto.id = inputPhoto;
+                        r.answer.input_media = inputMediaPhoto;
+
+                        performSendMessageRequest(req, msgObj, originalPath, parentMessage, check, delayedMessage, parentObject, params, scheduled);
+                    } else if (delayedMessage != null) {
+                        delayedMessage.markAsError();
+                    }
+                }));
+                return;
+            }
+        }
+
         if (!(req instanceof TLRPC.TL_messages_editMessage)) {
             if (check) {
                 DelayedMessage maxDelayedMessage = findMaxDelayedMessageForMessageId(msgObj.getId(), msgObj.getDialogId());
@@ -7011,7 +7457,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
             return;
         }
         newMsgObj.reqId = getConnectionsManager().sendRequest(req, (response, error) -> {
-            if (error != null && (req instanceof TLRPC.TL_messages_sendMedia || req instanceof TLRPC.TL_messages_editMessage) && FileRefController.isFileRefError(error.text)) {
+            if (error != null && (req instanceof TLRPC.TL_messages_sendMedia || req instanceof TLRPC.TL_messages_editMessage || req instanceof TLRPC.TL_messages_addPollAnswer) && FileRefController.isFileRefError(error.text)) {
                 if (FileRefController.isFileRefErrorCover(error.text)) {
                     if (removeCoverFromRequest(req)) {
                         performSendMessageRequest(req, msgObj, originalPath, parentMessage, check, delayedMessage, parentObject, params, scheduled);
@@ -7023,7 +7469,14 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 } else if (delayedMessage != null) {
                     AndroidUtilities.runOnUIThread(() -> {
                         removeFromSendingMessages(newMsgObj.id, scheduled);
-                        if (req instanceof TLRPC.TL_messages_sendMedia) {
+                        if (req instanceof TLRPC.TL_messages_addPollAnswer) {
+                            TLRPC.TL_messages_addPollAnswer request = (TLRPC.TL_messages_addPollAnswer) req;
+                            if (request.answer.input_media instanceof TLRPC.TL_inputMediaPhoto) {
+                                request.answer.input_media = delayedMessage.inputUploadMedia;
+                            } else if (request.answer.input_media instanceof TLRPC.TL_inputMediaDocument) {
+                                request.answer.input_media = delayedMessage.inputUploadMedia;
+                            }
+                        } else if (req instanceof TLRPC.TL_messages_sendMedia) {
                             TLRPC.TL_messages_sendMedia request = (TLRPC.TL_messages_sendMedia) req;
                             if (request.media instanceof TLRPC.TL_inputMediaPhoto) {
                                 request.media = delayedMessage.inputUploadMedia;
@@ -7044,7 +7497,38 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     return;
                 }
             }
-            if (req instanceof TLRPC.TL_messages_editMessage) {
+            if (req instanceof TLRPC.TL_messages_addPollAnswer) {
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (error == null) {
+                        final TLRPC.Updates updates = (TLRPC.Updates) response;
+                        ArrayList<TLRPC.Update> updatesArr = ((TLRPC.Updates) response).updates;
+                        TLRPC.Message message = null;
+                        if (message != null) {
+                            ImageLoader.saveMessageThumbs(message);
+                            updateMediaPaths(msgObj, message, message.id, originalPath, false, params);
+                        }
+
+                        newMsgObj.send_state = MessageObject.MESSAGE_SEND_STATE_SENT;
+                        ArrayList<TLRPC.Message> arr = new ArrayList<>();
+                        arr.add(newMsgObj);
+                        getMessagesStorage().putMessages(arr, false, true, false, 0, 0, 0);
+                        getMessagesController().getTopicsController().processEditedMessage(newMsgObj);
+
+                        Utilities.stageQueue.postRunnable(() -> {
+                            getMessagesController().processUpdates(updates, false);
+                            AndroidUtilities.runOnUIThread(() -> {
+                                processSentMessage(newMsgObj.id);
+                                removeFromSendingMessages(newMsgObj.id, scheduled);
+                            });
+                        });
+
+                    } else {
+                        AlertsCreator.processError(currentAccount, error, null, req);
+                        removeFromSendingMessages(newMsgObj.id, scheduled);
+                        revertEditingMessageObject(msgObj);
+                    }
+                });
+            } else if (req instanceof TLRPC.TL_messages_editMessage) {
                 AndroidUtilities.runOnUIThread(() -> {
                     if (error == null) {
                         final String attachPath = newMsgObj.attachPath;
@@ -7054,28 +7538,28 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         TLRPC.Message message = null;
                         for (int a = 0; a < updatesArr.size(); a++) {
                             TLRPC.Update update = updatesArr.get(a);
-                            if (update instanceof TLRPC.TL_updateEditMessage) {
-                                final TLRPC.TL_updateEditMessage newMessage = (TLRPC.TL_updateEditMessage) update;
+                            if (update instanceof TL_update.TL_updateEditMessage) {
+                                final TL_update.TL_updateEditMessage newMessage = (TL_update.TL_updateEditMessage) update;
                                 message = newMessage.message;
                                 break;
-                            } else if (update instanceof TLRPC.TL_updateEditChannelMessage) {
-                                final TLRPC.TL_updateEditChannelMessage newMessage = (TLRPC.TL_updateEditChannelMessage) update;
+                            } else if (update instanceof TL_update.TL_updateEditChannelMessage) {
+                                final TL_update.TL_updateEditChannelMessage newMessage = (TL_update.TL_updateEditChannelMessage) update;
                                 message = newMessage.message;
                                 break;
-                            } else if (update instanceof TLRPC.TL_updateNewScheduledMessage) {
-                                final TLRPC.TL_updateNewScheduledMessage newMessage = (TLRPC.TL_updateNewScheduledMessage) update;
+                            } else if (update instanceof TL_update.TL_updateNewScheduledMessage) {
+                                final TL_update.TL_updateNewScheduledMessage newMessage = (TL_update.TL_updateNewScheduledMessage) update;
                                 message = newMessage.message;
                                 break;
-                            } else if (update instanceof TLRPC.TL_updateQuickReplyMessage) {
+                            } else if (update instanceof TL_update.TL_updateQuickReplyMessage) {
                                 QuickRepliesController.getInstance(currentAccount).processUpdate(update, MessageObject.getQuickReplyName(newMsgObj), MessageObject.getQuickReplyId(newMsgObj));
-                                final TLRPC.TL_updateQuickReplyMessage newMessage = (TLRPC.TL_updateQuickReplyMessage) update;
+                                final TL_update.TL_updateQuickReplyMessage newMessage = (TL_update.TL_updateQuickReplyMessage) update;
                                 message = newMessage.message;
                                 break;
                             }
                         }
                         if (message != null) {
                             ImageLoader.saveMessageThumbs(message);
-                            updateMediaPaths(msgObj, message, message.id, originalPath, false);
+                            updateMediaPaths(msgObj, message, message.id, originalPath, false, params);
                         }
                         Utilities.stageQueue.postRunnable(() -> {
                             getMessagesController().processUpdates(updates, false);
@@ -7104,7 +7588,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         boolean scheduledOnline = newMsgObj.date == 0x7FFFFFFE;
                         if (response instanceof TLRPC.TL_updateShortSentMessage) {
                             final TLRPC.TL_updateShortSentMessage res = (TLRPC.TL_updateShortSentMessage) response;
-                            updateMediaPaths(msgObj, null, res.id, null, false);
+                            updateMediaPaths(msgObj, null, res.id, null, false, params);
                             existFlags = msgObj.getMediaExistanceFlags();
                             newMsgObj.local_id = newMsgObj.id = res.id;
                             newMsgObj.date = res.date;
@@ -7143,8 +7627,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             LongSparseArray<SparseArray<TLRPC.MessageReplies>> channelReplies = null;
                             for (int a = 0; a < updatesArr.size(); a++) {
                                 TLRPC.Update update = updatesArr.get(a);
-                                if (update instanceof TLRPC.TL_updateNewMessage) {
-                                    final TLRPC.TL_updateNewMessage newMessage = (TLRPC.TL_updateNewMessage) update;
+                                if (update instanceof TL_update.TL_updateNewMessage) {
+                                    final TL_update.TL_updateNewMessage newMessage = (TL_update.TL_updateNewMessage) update;
                                     if (newMessage.message.action != null) {
                                         continue;
                                     } else {
@@ -7153,8 +7637,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                     Utilities.stageQueue.postRunnable(() -> getMessagesController().processNewDifferenceParams(-1, newMessage.pts, -1, newMessage.pts_count));
                                     updatesArr.remove(a);
                                     a--;
-                                } else if (update instanceof TLRPC.TL_updateNewChannelMessage) {
-                                    final TLRPC.TL_updateNewChannelMessage newMessage = (TLRPC.TL_updateNewChannelMessage) update;
+                                } else if (update instanceof TL_update.TL_updateNewChannelMessage) {
+                                    final TL_update.TL_updateNewChannelMessage newMessage = (TL_update.TL_updateNewChannelMessage) update;
                                     long channelId = MessagesController.getUpdateChannelId(newMessage);
                                     TLRPC.Chat chat = getMessagesController().getChat(channelId);
                                     if ((chat == null || chat.megagroup) && newMessage.message.reply_to != null && (newMessage.message.reply_to.reply_to_top_id != 0 || newMessage.message.reply_to.reply_to_msg_id != 0)) {
@@ -7191,8 +7675,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                             getMessagesStorage().updatePinnedMessages(-channelId, mids, true, -1, 0, false, null);
                                         });
                                     }
-                                } else if (update instanceof TLRPC.TL_updateNewScheduledMessage) {
-                                    final TLRPC.TL_updateNewScheduledMessage newMessage = (TLRPC.TL_updateNewScheduledMessage) update;
+                                } else if (update instanceof TL_update.TL_updateNewScheduledMessage) {
+                                    final TL_update.TL_updateNewScheduledMessage newMessage = (TL_update.TL_updateNewScheduledMessage) update;
                                     for (int i = 0; i < sentMessages.size(); ++i) {
                                         if (sentMessages.get(i).id == newMessage.message.id) {
                                             sentMessages.remove(i);
@@ -7203,14 +7687,14 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                     updatesArr.remove(a);
                                     a--;
                                     currentSchedule = true;
-                                } else if (update instanceof TLRPC.TL_updateQuickReplyMessage) {
+                                } else if (update instanceof TL_update.TL_updateQuickReplyMessage) {
                                     QuickRepliesController.getInstance(currentAccount).processUpdate(update, msgObj.getQuickReplyName(), msgObj.getQuickReplyId());
-                                    final TLRPC.TL_updateQuickReplyMessage newMessage = (TLRPC.TL_updateQuickReplyMessage) update;
+                                    final TL_update.TL_updateQuickReplyMessage newMessage = (TL_update.TL_updateQuickReplyMessage) update;
                                     sentMessages.add(message = newMessage.message);
                                     updatesArr.remove(a);
                                     a--;
-                                } else if (update instanceof TLRPC.TL_updateDeleteScheduledMessages) {
-                                    final TLRPC.TL_updateDeleteScheduledMessages upd = (TLRPC.TL_updateDeleteScheduledMessages) update;
+                                } else if (update instanceof TL_update.TL_updateDeleteScheduledMessages) {
+                                    final TL_update.TL_updateDeleteScheduledMessages upd = (TL_update.TL_updateDeleteScheduledMessages) update;
                                     if (msgObj.getDialogId() == DialogObject.getPeerDialogId(upd.peer)) {
                                         for (int msg_id : upd.messages) {
                                             for (int i = 0; i < sentMessages.size(); ++i) {
@@ -7254,7 +7738,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                 if (msgObj.messageOwner.quick_reply_shortcut_id != 0) {
                                     msgObj.messageOwner.flags |= 1073741824;
                                 }
-                                updateMediaPaths(msgObj, message, message.id, originalPath, false);
+                                updateMediaPaths(msgObj, message, message.id, originalPath, false, params);
                                 existFlags = msgObj.getMediaExistanceFlags();
                                 newMsgObj.id = message.id;
                             } else {
@@ -7387,15 +7871,42 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 im.flags &=~ 4;
                 return true;
             }
+        } else if (req instanceof TLRPC.TL_messages_addPollAnswer) {
+            TLRPC.TL_messages_addPollAnswer r = (TLRPC.TL_messages_addPollAnswer) req;
+            final TLRPC.InputMedia inputMedia = r.answer.input_media;
+            if (inputMedia instanceof TLRPC.TL_inputMediaUploadedDocument) {
+                TLRPC.TL_inputMediaUploadedDocument im = (TLRPC.TL_inputMediaUploadedDocument) inputMedia;
+                im.video_cover = null;
+                im.flags &=~ 64;
+                return true;
+            } else if (inputMedia instanceof TLRPC.TL_inputMediaDocument) {
+                TLRPC.TL_inputMediaDocument im = (TLRPC.TL_inputMediaDocument) inputMedia;
+                im.video_cover = null;
+                im.flags &=~ 8;
+                return true;
+            } else if (inputMedia instanceof TLRPC.TL_inputMediaDocumentExternal) {
+                TLRPC.TL_inputMediaDocumentExternal im = (TLRPC.TL_inputMediaDocumentExternal) inputMedia;
+                im.video_cover = null;
+                im.flags &=~ 4;
+                return true;
+            }
         }
         return false;
     }
 
     private void updateMediaPaths(MessageObject newMsgObj, TLRPC.Message sentMessage, int newMsgId, String originalPath, boolean post) {
-        updateMediaPaths(newMsgObj, sentMessage, newMsgId, Collections.singletonList(originalPath), post, -1);
+        updateMediaPaths(newMsgObj, sentMessage, newMsgId, originalPath, post, null);
+    }
+
+    private void updateMediaPaths(MessageObject newMsgObj, TLRPC.Message sentMessage, int newMsgId, String originalPath, boolean post, HashMap<String, String> params) {
+        updateMediaPaths(newMsgObj, sentMessage, newMsgId, Collections.singletonList(originalPath), post, -1, params);
     }
 
     private void updateMediaPaths(MessageObject newMsgObj, TLRPC.Message sentMessage, int newMsgId, List<String> originalPaths, boolean post, int index) {
+        updateMediaPaths(newMsgObj, sentMessage, newMsgId, originalPaths, post, index, null);
+    }
+
+    private void updateMediaPaths(MessageObject newMsgObj, TLRPC.Message sentMessage, int newMsgId, List<String> originalPaths, boolean post, int index, HashMap<String, String> params) {
         TLRPC.Message newMsg = newMsgObj.messageOwner;
 
         final String originalPath = originalPaths.isEmpty() || Math.max(0, index) >= originalPaths.size() ? null : originalPaths.get(Math.max(0, index));
@@ -7459,7 +7970,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 }
                 if (index == -1) {
                     for (int i = 0; i < paidMedia.extended_media.size(); ++i) {
-                        updateMediaPaths(newMsgObj, sentMessage, newMsgId, originalPaths, post, i);
+                        updateMediaPaths(newMsgObj, sentMessage, newMsgId, originalPaths, post, i, sentMessage.params);
                     }
                     return;
                 }
@@ -8086,6 +8597,11 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
     private final static int ERROR_TYPE_FILE_TOO_LARGE = 2;
 
     private static int prepareSendingDocumentInternal(AccountInstance accountInstance, String path, String originalPath, Uri uri, String mime, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, TL_stories.StoryItem storyItem, ChatActivity.ReplyQuote quote, final ArrayList<TLRPC.MessageEntity> entities, final MessageObject editingMessageObject, long[] groupId, boolean isGroupFinal, CharSequence caption, boolean notify, int scheduleDate, int scheduleRepeatPeriod, Integer[] docType, boolean forceDocument, String quickReplyShortcut, int quickReplyShortcutId, long effectId, boolean invertMedia, long payStars, long monoForumPeerId, MessageSuggestionParams suggestionParams) {
+        return prepareSendingDocumentInternal(accountInstance, path, originalPath, uri, mime, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, entities, editingMessageObject, groupId, isGroupFinal, caption, notify, scheduleDate, scheduleRepeatPeriod, docType, forceDocument, quickReplyShortcut, quickReplyShortcutId, effectId, invertMedia, payStars, monoForumPeerId, suggestionParams, null, -1);
+    }
+
+    private static int prepareSendingDocumentInternal(AccountInstance accountInstance, String path, String originalPath, Uri uri, String mime, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, TL_stories.StoryItem storyItem, ChatActivity.ReplyQuote quote, final ArrayList<TLRPC.MessageEntity> entities, final MessageObject editingMessageObject, long[] groupId, boolean isGroupFinal, CharSequence caption, boolean notify, int scheduleDate, int scheduleRepeatPeriod, Integer[] docType, boolean forceDocument, String quickReplyShortcut, int quickReplyShortcutId, long effectId, boolean invertMedia, long payStars, long monoForumPeerId, MessageSuggestionParams suggestionParams, PollSendParams pollSendParams, int pollIndex) {
+        final long forcedPollGroupId = pollSendParams != null ? pollSendParams.groupId : 0;
         if ((path == null || path.length() == 0) && uri == null) {
             return ERROR_TYPE_UNSUPPORTED;
         }
@@ -8215,9 +8731,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
             }
         }
 
+        final boolean forceDisableCheckSentMedia = pollSendParams != null;
         TLRPC.TL_document document = null;
         String parentObject = null;
-        if (!sendNew && !isEncrypted) {
+        if (!sendNew && !isEncrypted && !forceDisableCheckSentMedia) {
             Object[] sentData = accountInstance.getMessagesStorage().getSentFile(originalPath, !isEncrypted ? MessagesStorage.SENT_FILE_TYPE_AUDIO : MessagesStorage.SENT_FILE_TYPE_AUDIO_ENCRYPTED);
             if (sentData != null && sentData[0] instanceof TLRPC.TL_document) {
                 document = (TLRPC.TL_document) sentData[0];
@@ -8364,7 +8881,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
             }
         }
         if (!isEncrypted && groupId != null) {
-            if (docType != null && prevType != null && prevType != docType[0]) {
+            if (docType != null && prevType != null && prevType != docType[0] && pollSendParams == null) {
                 finishGroup(accountInstance, groupId[0], scheduleDate);
                 groupId[0] = Utilities.random.nextLong();
             }
@@ -8374,6 +8891,9 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     params.put("final", "1");
                 }
             }
+        }
+        if (forcedPollGroupId != 0) {
+            params.put("groupId", "" + forcedPollGroupId);
         }
 
         AndroidUtilities.runOnUIThread(() -> {
@@ -8390,6 +8910,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 sendMessageParams.payStars = payStars;
                 sendMessageParams.monoForumPeer = monoForumPeerId;
                 sendMessageParams.suggestionParams = suggestionParams;
+                sendMessageParams.pollIndex = pollIndex;
+                sendMessageParams.pollSendParams = pollSendParams;
                 accountInstance.getSendMessagesHelper().sendMessage(sendMessageParams);
             }
         });
@@ -8418,6 +8940,113 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
     }
 
     @UiThread
+    public static void prepareSendingArticle(AccountInstance accountInstance, ArrayList<TL_iv.PageBlock> blocks, boolean rtl, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, boolean notify, int scheduleDate, int scheduleRepeatPeriod, String quickReplyShortcut, int quickReplyShortcutId, long effectId, long monoForumPeerId, long payStars) {
+        prepareSendingArticle(accountInstance, blocks, null, null, null, rtl, dialogId, replyToMsg, replyToTopMsg, notify, scheduleDate, scheduleRepeatPeriod, quickReplyShortcut, quickReplyShortcutId, effectId, monoForumPeerId, payStars);
+    }
+
+    public static void prepareSendingArticle(AccountInstance accountInstance, ArrayList<TL_iv.PageBlock> blocks, ArrayList<TLRPC.InputPhoto> photos, ArrayList<TLRPC.InputDocument> documents, ArrayList<TLRPC.InputUser> users, boolean rtl, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, boolean notify, int scheduleDate, int scheduleRepeatPeriod, String quickReplyShortcut, int quickReplyShortcutId, long effectId, long monoForumPeerId, long payStars) {
+        if (blocks == null || blocks.isEmpty()) {
+            return;
+        }
+        TL_iv.TL_inputRichMessage rich = new TL_iv.TL_inputRichMessage();
+        rich.rtl = rtl;
+        for (TL_iv.PageBlock block : blocks) {
+            TL_iv.PageBlock copy = toInputPageBlock(block);
+            if (copy != null) {
+                rich.blocks.add(copy);
+            }
+        }
+        if (rich.blocks.isEmpty()) {
+            return;
+        }
+        if (photos != null && !photos.isEmpty()) {
+            rich.flags |= TLObject.FLAG_2;
+            rich.photos.addAll(photos);
+        }
+        if (documents != null && !documents.isEmpty()) {
+            rich.flags |= TLObject.FLAG_3;
+            rich.documents.addAll(documents);
+        }
+        if (users != null && !users.isEmpty()) {
+            rich.flags |= TLObject.FLAG_4;
+            rich.users.addAll(users);
+        }
+        java.util.IdentityHashMap<Object, Boolean> seen = new java.util.IdentityHashMap<>();
+        for (TL_iv.PageBlock b : rich.blocks) {
+            clearRichTextParentsInBlock(b, seen);
+        }
+
+        SendMessageParams params = SendMessageParams.ofRichMessage(rich, dialogId, replyToMsg, replyToTopMsg, null, null, notify, scheduleDate, scheduleRepeatPeriod);
+        params.quick_reply_shortcut = quickReplyShortcut;
+        params.quick_reply_shortcut_id = quickReplyShortcutId;
+        params.effect_id = effectId;
+        params.monoForumPeer = monoForumPeerId;
+        params.payStars = payStars;
+        accountInstance.getSendMessagesHelper().sendMessage(params);
+    }
+
+    private static TL_iv.RichMessage inputRichMessageToRichMessage(TL_iv.TL_inputRichMessage input) {
+        TL_iv.RichMessage out = new TL_iv.RichMessage();
+        if (input instanceof TL_iv.TL_inputRichMessage) {
+            TL_iv.TL_inputRichMessage src = (TL_iv.TL_inputRichMessage) input;
+            out.rtl = src.rtl;
+            out.blocks = new ArrayList<>(src.blocks);
+        }
+        return out;
+    }
+
+    private static TL_iv.PageBlock toInputPageBlock(TL_iv.PageBlock block) {
+        return block;
+    }
+
+    private static void clearRichTextParents(TL_iv.RichText t) {
+        if (t == null) return;
+        t.parentRichText = null;
+        if (t.text != null) clearRichTextParents(t.text);
+        if (t.texts != null) {
+            for (TL_iv.RichText c : t.texts) clearRichTextParents(c);
+        }
+    }
+
+    // GSON cant serialize structures with cyclic references
+    private static void clearRichTextParentsInBlock(TL_iv.PageBlock b, java.util.IdentityHashMap<Object, Boolean> seen) {
+        if (b == null || seen.put(b, Boolean.TRUE) != null) return;
+        for (java.lang.reflect.Field f : b.getClass().getFields()) {
+            if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+            try {
+                Object v = f.get(b);
+                if (v instanceof TL_iv.RichText) {
+                    clearRichTextParents((TL_iv.RichText) v);
+                } else if (v instanceof TL_iv.PageBlock) {
+                    clearRichTextParentsInBlock((TL_iv.PageBlock) v, seen);
+                } else if (v instanceof TL_iv.PageCaption) {
+                    clearRichTextParents(((TL_iv.PageCaption) v).text);
+                    clearRichTextParents(((TL_iv.PageCaption) v).credit);
+                } else if (v instanceof java.util.List) {
+                    for (Object item : (java.util.List<?>) v) {
+                        if (item instanceof TL_iv.PageBlock) clearRichTextParentsInBlock((TL_iv.PageBlock) item, seen);
+                        else if (item instanceof TL_iv.RichText) clearRichTextParents((TL_iv.RichText) item);
+                        else if (item instanceof TL_iv.PageListItem || item instanceof TL_iv.PageListOrderedItem) {
+                            for (java.lang.reflect.Field f2 : item.getClass().getFields()) {
+                                if (java.lang.reflect.Modifier.isStatic(f2.getModifiers())) continue;
+                                try {
+                                    Object v2 = f2.get(item);
+                                    if (v2 instanceof TL_iv.RichText) clearRichTextParents((TL_iv.RichText) v2);
+                                    else if (v2 instanceof java.util.List) {
+                                        for (Object it2 : (java.util.List<?>) v2) {
+                                            if (it2 instanceof TL_iv.PageBlock) clearRichTextParentsInBlock((TL_iv.PageBlock) it2, seen);
+                                        }
+                                    }
+                                } catch (IllegalAccessException ignored2) {}
+                            }
+                        }
+                    }
+                }
+            } catch (IllegalAccessException ignored) {}
+        }
+    }
+
+    @UiThread
     public static void prepareSendingDocument(AccountInstance accountInstance, String path, String originalPath, Uri uri, String caption, String mine, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, TL_stories.StoryItem storyItem, ChatActivity.ReplyQuote quote, MessageObject editingMessageObject, boolean notify, int scheduleDate, InputContentInfoCompat inputContent, String quickReplyShortcut, int quickReplyShortcutId, boolean invertMedia) {
         if ((path == null || originalPath == null) && uri == null) {
             return;
@@ -8438,9 +9067,15 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
 
     @UiThread
     public static void prepareSendingAudioDocuments(AccountInstance accountInstance, ArrayList<MessageObject> messageObjects, CharSequence caption, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, TL_stories.StoryItem storyItem, boolean notify, int scheduleDate, int scheduledRepeatPeriod, MessageObject editingMessageObject, String quickReplyShortcut, int quickReplyShortcutId, long effectId, boolean invertMedia, long payStars) {
+        prepareSendingAudioDocuments(accountInstance, messageObjects, caption, dialogId, replyToMsg, replyToTopMsg, storyItem, notify, scheduleDate, scheduledRepeatPeriod, editingMessageObject, quickReplyShortcut, quickReplyShortcutId, effectId, invertMedia, payStars, null, null, false, null);
+    }
+
+    @UiThread
+    public static void prepareSendingAudioDocuments(AccountInstance accountInstance, ArrayList<MessageObject> messageObjects, CharSequence caption, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, TL_stories.StoryItem storyItem, boolean notify, int scheduleDate, int scheduledRepeatPeriod, MessageObject editingMessageObject, String quickReplyShortcut, int quickReplyShortcutId, long effectId, boolean invertMedia, long payStars, PollSendParams pollSendParams, ArrayList<Integer> pollSendIndexes, boolean forcedPollDoNotSendFinal, Runnable afterCommandsDone) {
         new Thread(() -> {
             int count = messageObjects.size();
-            long groupId = 0;
+            final long forcedPollGroupId = pollSendParams != null ? pollSendParams.groupId : 0;
+            long groupId = forcedPollGroupId;
             int mediaCount = 0;
             for (int a = 0; a < count; a++) {
                 final MessageObject messageObject = messageObjects.get(a);
@@ -8448,7 +9083,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 final File f = new File(originalPath);
 
                 boolean isEncrypted = DialogObject.isEncryptedDialog(dialogId);
-                if (!isEncrypted && count > 1 && mediaCount % 10 == 0) {
+                if (!isEncrypted && count > 1 && mediaCount % 10 == 0 && pollSendParams == null) {
                     groupId = Utilities.random.nextLong();
                     mediaCount = 0;
                 }
@@ -8459,7 +9094,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
 
                 TLRPC.TL_document document = null;
                 String parentObject = null;
-                if (!isEncrypted) {
+                final boolean forceDisableCheckSentMedia = pollSendParams != null;
+                if (!isEncrypted && !forceDisableCheckSentMedia) {
                     Object[] sentData = accountInstance.getMessagesStorage().getSentFile(originalPath, !isEncrypted ? MessagesStorage.SENT_FILE_TYPE_AUDIO : MessagesStorage.SENT_FILE_TYPE_AUDIO_ENCRYPTED);
                     if (sentData != null && sentData[0] instanceof TLRPC.TL_document) {
                         document = (TLRPC.TL_document) sentData[0];
@@ -8493,9 +9129,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 }
                 mediaCount++;
                 params.put("groupId", "" + groupId);
-                if (mediaCount == 10 || a == count - 1) {
+                if (!forcedPollDoNotSendFinal && (pollSendParams == null && mediaCount == 10 || a == count - 1)) {
                     params.put("final", "1");
                 }
+                final int pollIndex = pollSendIndexes != null ? pollSendIndexes.get(a) : -1;
                 AndroidUtilities.runOnUIThread(() -> {
                     if (editingMessageObject != null) {
                         accountInstance.getSendMessagesHelper().editMessage(editingMessageObject, null, null, documentFinal, messageObject.messageOwner.attachPath, null, params, false, false, parentFinal);
@@ -8507,9 +9144,14 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         sendMessageParams.effect_id = effectId;
                         sendMessageParams.invert_media = invertMedia;
                         sendMessageParams.payStars = payStars;
+                        sendMessageParams.pollIndex = pollIndex;
+                        sendMessageParams.pollSendParams = pollSendParams;
                         accountInstance.getSendMessagesHelper().sendMessage(sendMessageParams);
                     }
                 });
+            }
+            if (afterCommandsDone != null) {
+                afterCommandsDone.run();
             }
         }).start();
     }
@@ -8528,7 +9170,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
 
                 TLRPC.TL_messages_messages messagesRes = new TLRPC.TL_messages_messages();
                 messagesRes.messages.add(prevMessage.messageOwner);
-                if (!message.paidMedia) {
+                if (!message.paidMedia && !message.pollMedia) {
                     accountInstance.getMessagesStorage().putMessages(messagesRes, message.peer, -2, 0, false, scheduleDate != 0 ? 1 : 0, 0);
                 }
                 instance.sendReadyToSendGroup(message, true, true);
@@ -8543,6 +9185,11 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
 
     @UiThread
     public static void prepareSendingDocuments(AccountInstance accountInstance, ArrayList<String> paths, ArrayList<String> originalPaths, ArrayList<Uri> uris, String caption, ArrayList<TLRPC.MessageEntity> captionEntities, String mime, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, TL_stories.StoryItem storyItem, ChatActivity.ReplyQuote quote, MessageObject editingMessageObject, boolean notify, int scheduleDate, int scheduleRepeatPeriod, InputContentInfoCompat inputContent, String quickReplyShortcut, int quickReplyShortcutId, long effectId, boolean invertMedia, long payStars, long monoForumPeerId, MessageSuggestionParams suggestionParams) {
+        prepareSendingDocuments(accountInstance, paths, originalPaths, uris, caption, captionEntities, mime, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, editingMessageObject, notify, scheduleDate, scheduleRepeatPeriod, inputContent, quickReplyShortcut, quickReplyShortcutId, effectId, invertMedia, payStars, monoForumPeerId, suggestionParams, null, null, null, false);
+    }
+
+    @UiThread
+    public static void prepareSendingDocuments(AccountInstance accountInstance, ArrayList<String> paths, ArrayList<String> originalPaths, ArrayList<Uri> uris, String caption, ArrayList<TLRPC.MessageEntity> captionEntities, String mime, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, TL_stories.StoryItem storyItem, ChatActivity.ReplyQuote quote, MessageObject editingMessageObject, boolean notify, int scheduleDate, int scheduleRepeatPeriod, InputContentInfoCompat inputContent, String quickReplyShortcut, int quickReplyShortcutId, long effectId, boolean invertMedia, long payStars, long monoForumPeerId, MessageSuggestionParams suggestionParams, PollSendParams pollSendParams, ArrayList<Integer> pollSendIndexes, ArrayList<Integer> pollSendUriIndexes, boolean forcedPollDoNotSendFinal) {
         if (paths == null && originalPaths == null && uris == null || paths != null && originalPaths != null && paths.size() != originalPaths.size()) {
             return;
         }
@@ -8558,7 +9205,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 int count = paths.size();
                 for (int a = 0; a < count; a++) {
                     final String captionFinal = a == 0 ? caption : null;
-                    if (!isEncrypted && count > 1 && mediaCount % 10 == 0) {
+                    if (!isEncrypted && count > 1 && mediaCount % 10 == 0 && pollSendParams == null) {
                         if (groupId[0] != 0) {
                             finishGroup(accountInstance, groupId[0], scheduleDate);
                         }
@@ -8567,7 +9214,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     }
                     mediaCount++;
                     long prevGroupId = groupId[0];
-                    error = prepareSendingDocumentInternal(accountInstance, paths.get(a), originalPaths.get(a), null, mime, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, a == 0 ? captionEntities : null, editingMessageObject, groupId, mediaCount == 10 || a == count - 1, captionFinal, notify, scheduleDate, scheduleRepeatPeriod, docType, inputContent == null, quickReplyShortcut, quickReplyShortcutId, first ? effectId : 0, invertMedia, payStars, monoForumPeerId, suggestionParams);
+                    error = prepareSendingDocumentInternal(accountInstance, paths.get(a), originalPaths.get(a), null, mime, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, a == 0 ? captionEntities : null, editingMessageObject, groupId, !forcedPollDoNotSendFinal && (pollSendParams == null && mediaCount == 10 || a == count - 1), captionFinal, notify, scheduleDate, scheduleRepeatPeriod, docType, inputContent == null, quickReplyShortcut, quickReplyShortcutId, first ? effectId : 0, invertMedia, payStars, monoForumPeerId, suggestionParams, pollSendParams, pollSendIndexes != null ? pollSendIndexes.get(a) : -1);
                     first = false;
                     if (prevGroupId != groupId[0] || groupId[0] == -1) {
                         mediaCount = 1;
@@ -8581,7 +9228,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 for (int a = 0; a < uris.size(); a++) {
                     final String captionFinal = a == 0 && (paths == null || paths.size() == 0) ? caption : null;
                     final ArrayList<TLRPC.MessageEntity> captionEntitiesFinal = a == 0 && (paths == null || paths.size() == 0) ? captionEntities : null;
-                    if (!isEncrypted && count > 1 && mediaCount % 10 == 0) {
+                    if (!isEncrypted && count > 1 && mediaCount % 10 == 0 && pollSendParams == null) {
                         if (groupId[0] != 0) {
                             finishGroup(accountInstance, groupId[0], scheduleDate);
                         }
@@ -8590,7 +9237,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     }
                     mediaCount++;
                     long prevGroupId = groupId[0];
-                    error = prepareSendingDocumentInternal(accountInstance, null, null, uris.get(a), mime, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, captionEntitiesFinal, editingMessageObject, groupId, mediaCount == 10 || a == count - 1, captionFinal, notify, scheduleDate, scheduleRepeatPeriod, docType, inputContent == null, quickReplyShortcut, quickReplyShortcutId, first ? effectId : 0, invertMedia, payStars, monoForumPeerId, suggestionParams);
+                    error = prepareSendingDocumentInternal(accountInstance, null, null, uris.get(a), mime, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, captionEntitiesFinal, editingMessageObject, groupId, !forcedPollDoNotSendFinal && (pollSendParams == null && mediaCount == 10 || a == count - 1), captionFinal, notify, scheduleDate, scheduleRepeatPeriod, docType, inputContent == null, quickReplyShortcut, quickReplyShortcutId, first ? effectId : 0, invertMedia, payStars, monoForumPeerId, suggestionParams, pollSendParams, pollSendUriIndexes != null ? pollSendUriIndexes.get(a) : -1);
                     first = false;
                     if (prevGroupId != groupId[0] || groupId[0] == -1) {
                         mediaCount = 1;
@@ -9241,6 +9888,21 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
 
     @UiThread
     public static void prepareSendingMedia(AccountInstance accountInstance, ArrayList<SendingMediaInfo> media, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, TL_stories.StoryItem storyItem, ChatActivity.ReplyQuote quote, boolean forceDocument, boolean groupMedia, MessageObject editingMessageObject, boolean notify, int scheduleDate, int scheduleRepeatPeriod, int mode, boolean updateStikcersOrder, InputContentInfoCompat inputContent, String quickReplyShortcut, int quickReplyShortcutId, long effectId, boolean invertMedia, long payStars, long monoForumPeerId, MessageSuggestionParams suggestionParams) {
+        prepareSendingMedia(accountInstance, media, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, forceDocument, groupMedia, editingMessageObject, null, notify, scheduleDate, scheduleRepeatPeriod, mode, updateStikcersOrder, inputContent, quickReplyShortcut, quickReplyShortcutId, effectId, invertMedia, payStars, monoForumPeerId, suggestionParams);
+    }
+
+    @UiThread
+    public static void prepareSendingMedia(AccountInstance accountInstance, ArrayList<SendingMediaInfo> media, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, TL_stories.StoryItem storyItem, ChatActivity.ReplyQuote quote, boolean forceDocument, boolean groupMedia, MessageObject editingMessageObject, TLRPC.TL_inputPollAnswer pollToAddOptionMessageObject, boolean notify, int scheduleDate, int scheduleRepeatPeriod, int mode, boolean updateStikcersOrder, InputContentInfoCompat inputContent, String quickReplyShortcut, int quickReplyShortcutId, long effectId, boolean invertMedia, long payStars, long monoForumPeerId, MessageSuggestionParams suggestionParams) {
+        prepareSendingMedia(accountInstance, media, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, forceDocument, groupMedia, editingMessageObject, pollToAddOptionMessageObject, notify, scheduleDate, scheduleRepeatPeriod, mode, updateStikcersOrder, inputContent, quickReplyShortcut, quickReplyShortcutId, effectId, invertMedia, payStars, monoForumPeerId, suggestionParams, null, false);
+    }
+
+    @UiThread
+    public static void prepareSendingMedia(AccountInstance accountInstance, ArrayList<SendingMediaInfo> media, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, TL_stories.StoryItem storyItem, ChatActivity.ReplyQuote quote, boolean forceDocument, boolean groupMedia, MessageObject editingMessageObject, boolean notify, int scheduleDate, int scheduleRepeatPeriod, int mode, boolean updateStikcersOrder, InputContentInfoCompat inputContent, String quickReplyShortcut, int quickReplyShortcutId, long effectId, boolean invertMedia, long payStars, long monoForumPeerId, MessageSuggestionParams suggestionParams, PollSendParams pollSendParams, boolean forcedPollDoNotSendFinal) {
+        prepareSendingMedia(accountInstance, media, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, forceDocument, groupMedia, editingMessageObject, null, notify, scheduleDate, scheduleRepeatPeriod, mode, updateStikcersOrder, inputContent, quickReplyShortcut, quickReplyShortcutId, effectId, invertMedia, payStars, monoForumPeerId, suggestionParams, pollSendParams, forcedPollDoNotSendFinal);
+    }
+
+    @UiThread
+    public static void prepareSendingMedia(AccountInstance accountInstance, ArrayList<SendingMediaInfo> media, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, TL_stories.StoryItem storyItem, ChatActivity.ReplyQuote quote, boolean forceDocument, boolean groupMedia, MessageObject editingMessageObject, TLRPC.TL_inputPollAnswer pollToAddOptionMessageObject, boolean notify, int scheduleDate, int scheduleRepeatPeriod, int mode, boolean updateStikcersOrder, InputContentInfoCompat inputContent, String quickReplyShortcut, int quickReplyShortcutId, long effectId, boolean invertMedia, long payStars, long monoForumPeerId, MessageSuggestionParams suggestionParams, PollSendParams pollSendParams, boolean forcedPollDoNotSendFinal) {
         if (media.isEmpty()) {
             return;
         }
@@ -9250,6 +9912,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 break;
             }
         }
+        final long forcedPollGroupId = pollSendParams != null ? pollSendParams.groupId : 0;
+        final boolean forceDisableCheckSentMedia = forcedPollGroupId != 0;
         final boolean groupMediaFinal = groupMedia;
         mediaSendQueue.postRunnable(() -> {
             long beginTime = System.currentTimeMillis();
@@ -9303,7 +9967,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         }
                         TLRPC.TL_photo photo = null;
                         String parentObject = null;
-                        if (!isEncrypted && info.ttl == 0) {
+                        if (!isEncrypted && info.ttl == 0 && !forceDisableCheckSentMedia) {
                             final int sentFileType = info.highQuality ? (!isEncrypted ? MessagesStorage.SENT_FILE_TYPE_PHOTO_HIGH_QUALITY : MessagesStorage.SENT_FILE_TYPE_PHOTO_HIGH_QUALITY_ENCRYPTED) : (!isEncrypted ? MessagesStorage.SENT_FILE_TYPE_PHOTO : MessagesStorage.SENT_FILE_TYPE_PHOTO_ENCRYPTED);
                             Object[] sentData = accountInstance.getMessagesStorage().getSentFile(originalPath, sentFileType);
                             if (sentData != null && sentData[0] instanceof TLRPC.TL_photo) {
@@ -9354,7 +10018,9 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
             for (int a = 0; a < count; a++) {
                 final SendingMediaInfo info = media.get(a);
                 final boolean last = mediaCount == 0;
-                if (groupMediaFinal && count > 1 && mediaCount % 10 == 0) {
+                if (forcedPollGroupId != 0) {
+                    lastGroupId = groupId = forcedPollGroupId;
+                } else if (groupMediaFinal && count > 1 && mediaCount % 10 == 0) {
                     lastGroupId = groupId = Utilities.random.nextLong();
                     mediaCount = 0;
                 }
@@ -9450,8 +10116,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             params.put("parentObject", parentFinal);
                         }
                         AndroidUtilities.runOnUIThread(() -> {
-                            if (editingMessageObject != null) {
-                                accountInstance.getSendMessagesHelper().editMessage(editingMessageObject, null, null, documentFinal, pathFinal, null, params, false, info.hasMediaSpoilers, parentFinal);
+                            if (editingMessageObject != null || pollToAddOptionMessageObject != null) {
+                                accountInstance.getSendMessagesHelper().editMessage(editingMessageObject, pollToAddOptionMessageObject, null, null, documentFinal, pathFinal, null, params, false, info.hasMediaSpoilers, parentFinal);
                             } else {
                                 SendMessageParams sendMessageParams = SendMessageParams.of(documentFinal, null, pathFinal, dialogId, replyToMsg, replyToTopMsg, info.caption, info.entities, null, params, notify, scheduleDate, scheduleRepeatPeriod, 0, parentFinal, null, false, info.hasMediaSpoilers);
                                 sendMessageParams.replyToStoryItem = storyItem;
@@ -9465,6 +10131,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                 sendMessageParams.payStars = payStars;
                                 sendMessageParams.monoForumPeer = monoForumPeerId;
                                 sendMessageParams.suggestionParams = suggestionParams;
+                                sendMessageParams.pollIndex = info.pollIndex;
+                                sendMessageParams.pollSendParams = pollSendParams;
                                 accountInstance.getSendMessagesHelper().sendMessage(sendMessageParams);
                             }
                         });
@@ -9527,14 +10195,14 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             if (groupMediaFinal) {
                                 mediaCount++;
                                 params.put("groupId", "" + groupId);
-                                if (mediaCount == 10 || a == count -1) {
+                                if (!forcedPollDoNotSendFinal && (pollSendParams == null && mediaCount == 10 || a == count -1)) {
                                     params.put("final", "1");
                                     lastGroupId = 0;
                                 }
                             }
                             AndroidUtilities.runOnUIThread(() -> {
-                                if (editingMessageObject != null) {
-                                    accountInstance.getSendMessagesHelper().editMessage(editingMessageObject, photoFinal, null, null, needDownloadHttpFinal ? info.searchImage.imageUrl : null, null, params, false, info.hasMediaSpoilers, parentFinal);
+                                if (editingMessageObject != null || pollToAddOptionMessageObject != null) {
+                                    accountInstance.getSendMessagesHelper().editMessage(editingMessageObject, pollToAddOptionMessageObject, photoFinal, null, null, needDownloadHttpFinal ? info.searchImage.imageUrl : null, null, params, false, info.hasMediaSpoilers, parentFinal);
                                 } else {
                                     SendMessageParams sendMessageParams = SendMessageParams.of(photoFinal, needDownloadHttpFinal ? info.searchImage.imageUrl : null, dialogId, replyToMsg, replyToTopMsg, info.caption, info.entities, null, params, notify, scheduleDate, scheduleRepeatPeriod, info.ttl, parentFinal, false, info.hasMediaSpoilers);
                                     sendMessageParams.replyToStoryItem = storyItem;
@@ -9546,6 +10214,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                     sendMessageParams.payStars = payStars;
                                     sendMessageParams.monoForumPeer = monoForumPeerId;
                                     sendMessageParams.suggestionParams =  suggestionParams;
+                                    sendMessageParams.pollIndex = info.pollIndex;
+                                    sendMessageParams.pollSendParams = pollSendParams;
                                     accountInstance.getSendMessagesHelper().sendMessage(sendMessageParams);
                                 }
                             });
@@ -9590,7 +10260,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             }
                             TLRPC.TL_document document = null;
                             String parentObject = null;
-                            if (!isEncrypted && info.ttl == 0 && (videoEditedInfo == null || videoEditedInfo.filterState == null && videoEditedInfo.paintPath == null && videoEditedInfo.mediaEntities == null && videoEditedInfo.cropState == null)) {
+                            if (!isEncrypted && info.ttl == 0 && !forceDisableCheckSentMedia && (videoEditedInfo == null || videoEditedInfo.filterState == null && videoEditedInfo.paintPath == null && videoEditedInfo.mediaEntities == null && videoEditedInfo.cropState == null)) {
                                 Object[] sentData = accountInstance.getMessagesStorage().getSentFile(originalPath, !isEncrypted ? MessagesStorage.SENT_FILE_TYPE_VIDEO : MessagesStorage.SENT_FILE_TYPE_VIDEO_ENCRYPTED);
                                 if (sentData != null && sentData[0] instanceof TLRPC.TL_document) {
                                     document = (TLRPC.TL_document) sentData[0];
@@ -9748,7 +10418,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             if (!muted && groupMediaFinal) {
                                 mediaCount++;
                                 params.put("groupId", "" + groupId);
-                                if (mediaCount == 10 || a == count -1) {
+                                if (!forcedPollDoNotSendFinal && (pollSendParams == null && mediaCount == 10 || a == count -1)) {
                                     params.put("final", "1");
                                     lastGroupId = 0;
                                 }
@@ -9767,8 +10437,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                 if (thumbFinal != null && thumbKeyFinal != null) {
                                     ImageLoader.getInstance().putImageToCache(new BitmapDrawable(thumbFinal), thumbKeyFinal, false);
                                 }
-                                if (editingMessageObject != null) {
-                                    accountInstance.getSendMessagesHelper().editMessage(editingMessageObject, null, videoEditedInfo, videoFinal, finalPath, null, params, false, info.hasMediaSpoilers, parentFinal);
+                                if (editingMessageObject != null || pollToAddOptionMessageObject != null) {
+                                    accountInstance.getSendMessagesHelper().editMessage(editingMessageObject, pollToAddOptionMessageObject, null, videoEditedInfo, videoFinal, finalPath, null, params, false, info.hasMediaSpoilers, parentFinal);
                                 } else {
                                     SendMessageParams sendMessageParams = SendMessageParams.of(videoFinal, videoEditedInfo, finalPath, dialogId, replyToMsg, replyToTopMsg, info.caption, info.entities, null, params, notify, scheduleDate, scheduleRepeatPeriod, info.ttl, parentFinal, null, false, info.hasMediaSpoilers);
                                     sendMessageParams.replyToStoryItem = storyItem;
@@ -9782,6 +10452,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                     sendMessageParams.payStars = payStars;
                                     sendMessageParams.monoForumPeer = monoForumPeerId;
                                     sendMessageParams.suggestionParams = suggestionParams;
+                                    sendMessageParams.pollIndex = info.pollIndex;
+                                    sendMessageParams.pollSendParams = pollSendParams;
                                     accountInstance.getSendMessagesHelper().sendMessage(sendMessageParams);
                                 }
                             });
@@ -9911,13 +10583,13 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             } else {
                                 if (!isEncrypted && info.ttl == 0) {
                                     final int sentFileType = info.highQuality ? (!isEncrypted ? MessagesStorage.SENT_FILE_TYPE_PHOTO_HIGH_QUALITY : MessagesStorage.SENT_FILE_TYPE_PHOTO_HIGH_QUALITY_ENCRYPTED) : !isEncrypted ? MessagesStorage.SENT_FILE_TYPE_PHOTO : MessagesStorage.SENT_FILE_TYPE_PHOTO_ENCRYPTED;
-                                    Object[] sentData = accountInstance.getMessagesStorage().getSentFile(originalPath, sentFileType);
+                                    Object[] sentData = !forceDisableCheckSentMedia ? accountInstance.getMessagesStorage().getSentFile(originalPath, sentFileType) : null;
                                     if (sentData != null && sentData[0] instanceof TLRPC.TL_photo) {
                                         photo = (TLRPC.TL_photo) sentData[0];
                                         parentObject = (String) sentData[1];
                                     }
                                     if (photo == null && info.uri != null) {
-                                        sentData = accountInstance.getMessagesStorage().getSentFile(AndroidUtilities.getPath(info.uri), sentFileType);
+                                        sentData = !forceDisableCheckSentMedia ? accountInstance.getMessagesStorage().getSentFile(AndroidUtilities.getPath(info.uri), sentFileType) : null;
                                         if (sentData != null && sentData[0] instanceof TLRPC.TL_photo) {
                                             photo = (TLRPC.TL_photo) sentData[0];
                                             parentObject = (String) sentData[1];
@@ -9968,7 +10640,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                 if (groupMediaFinal) {
                                     mediaCount++;
                                     params.put("groupId", "" + groupId);
-                                    if (mediaCount == 10 || a == count - 1) {
+                                    if (!forcedPollDoNotSendFinal && (pollSendParams == null && mediaCount == 10 || a == count - 1)) {
                                         params.put("final", "1");
                                         lastGroupId = 0;
                                     }
@@ -9978,8 +10650,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                     if (bitmapFinal[0] != null && keyFinal[0] != null) {
                                         ImageLoader.getInstance().putImageToCache(new BitmapDrawable(bitmapFinal[0]), keyFinal[0], false);
                                     }
-                                    if (editingMessageObject != null) {
-                                        accountInstance.getSendMessagesHelper().editMessage(editingMessageObject, photoFinal, null, null, null, null, params, false, info.hasMediaSpoilers, parentFinal);
+                                    if (editingMessageObject != null || pollToAddOptionMessageObject != null) {
+                                        accountInstance.getSendMessagesHelper().editMessage(editingMessageObject, pollToAddOptionMessageObject, photoFinal, null, null, null, null, params, false, info.hasMediaSpoilers, parentFinal);
                                     } else {
                                         SendMessageParams sendMessageParams = SendMessageParams.of(photoFinal, null, dialogId, replyToMsg, replyToTopMsg, info.caption, info.entities, null, params, notify, scheduleDate, scheduleRepeatPeriod, info.ttl, parentFinal, updateStikcersOrder, info.hasMediaSpoilers);
                                         sendMessageParams.replyToStoryItem = storyItem;
@@ -9993,6 +10665,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                         sendMessageParams.monoForumPeer = monoForumPeerId;
                                         sendMessageParams.suggestionParams = suggestionParams;
                                         sendMessageParams.sendingHighQuality = highQuality;
+                                        sendMessageParams.pollIndex = info.pollIndex;
+                                        sendMessageParams.pollSendParams = pollSendParams;
                                         accountInstance.getSendMessagesHelper().sendMessage(sendMessageParams);
                                     }
                                 });
@@ -10014,7 +10688,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     }
                 }
             }
-            if (lastGroupId != 0) {
+            if (lastGroupId != 0 && !forcedPollDoNotSendFinal) {
                 finishGroup(accountInstance, lastGroupId, scheduleDate);
             }
             if (inputContent != null) {
@@ -10029,7 +10703,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         mediaCount = 0;
                     }
                     mediaCount++;
-                    int error = prepareSendingDocumentInternal(accountInstance, sendAsDocuments.get(a), sendAsDocumentsOriginal.get(a), sendAsDocumentsUri.get(a), extension, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, sendAsDocumentsEntities.get(a), editingMessageObject, groupId2, mediaCount == 10 || a == documentsCount - 1, sendAsDocumentsCaptions.get(a), notify, scheduleDate, 0, null, forceDocument, quickReplyShortcut, quickReplyShortcutId, effectId, invertMedia, payStars, monoForumPeerId, suggestionParams);
+                    int error = prepareSendingDocumentInternal(accountInstance, sendAsDocuments.get(a), sendAsDocumentsOriginal.get(a), sendAsDocumentsUri.get(a), extension, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, sendAsDocumentsEntities.get(a), editingMessageObject, groupId2, mediaCount == 10 || a == documentsCount - 1, sendAsDocumentsCaptions.get(a), notify, scheduleDate, 0, null, forceDocument, quickReplyShortcut, quickReplyShortcutId, effectId, invertMedia, payStars, monoForumPeerId, suggestionParams, null, -1);
                     handleError(error, accountInstance);
                 }
             }
@@ -10037,6 +10711,103 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 FileLog.d("total send time = " + (System.currentTimeMillis() - beginTime));
             }
         });
+    }
+
+    @UiThread
+    public static void prepareSendingPoll(AccountInstance accountInstance, @NonNull PollSendParams pollSendParams, long dialogId, MessageObject replyToMsg, MessageObject replyToTopMsg, TL_stories.StoryItem storyItem, ChatActivity.ReplyQuote quote, boolean notify, int scheduleDate, String quickReplyShortcut, int quickReplyShortcutId, long payStars, long monoForumPeerId, MessageSuggestionParams suggestionParams) {
+        if (pollSendParams.mediaPack != null) {
+            ArrayList<SendMessagesHelper.SendingMediaInfo> mediaInfos = new ArrayList<>();
+
+            ArrayList<String> documentInfos = new ArrayList<>();
+            ArrayList<String> originalPaths = new ArrayList<>();
+            ArrayList<Integer> documentPollIndex = new ArrayList<>();
+
+            ArrayList<Uri> documentUris = new ArrayList<>();
+            ArrayList<Integer> documentUrisPollIndex = new ArrayList<>();
+
+            ArrayList<MessageObject> musicMessageObjects = new ArrayList<>();
+            ArrayList<Integer> musicPollIndex = new ArrayList<>();
+
+            final int[] counter = new int[1];
+
+            for (int a = 0, N = pollSendParams.mediaPack.medias.size(); a < N; a++) {
+                final PollAttachedMedia attachedMedia = pollSendParams.mediaPack.medias.valueAt(a);
+                final int key = pollSendParams.mediaPack.medias.keyAt(a);
+
+                if (attachedMedia instanceof PollAttachedMediaMusic) {
+                    MessageObject musicMessageObject = ((PollAttachedMediaMusic) attachedMedia).messageObject;
+                    musicMessageObjects.add(musicMessageObject);
+                    musicPollIndex.add(key);
+                } else if (attachedMedia instanceof PollAttachedMediaGallery) {
+                    SendMessagesHelper.SendingMediaInfo info = ((PollAttachedMediaGallery) attachedMedia).sendingMediaInfo;
+                    info.pollIndex = key;
+                    mediaInfos.add(info);
+                } else if (attachedMedia instanceof PollAttachedMediaFile) {
+                    PollAttachedMediaFile file = (PollAttachedMediaFile) attachedMedia;
+                    if (!TextUtils.isEmpty(file.path)) {
+                        documentInfos.add(file.path);
+                        originalPaths.add(file.path);
+                        documentPollIndex.add(key);
+                    } else if (file.uri != null) {
+                        documentUris.add(file.uri);
+                        documentUrisPollIndex.add(key);
+                    }
+                }
+            }
+
+            boolean hasMedia = false;
+            if (!mediaInfos.isEmpty()) {
+                counter[0]++;
+                hasMedia = true;
+            }
+            if (!documentInfos.isEmpty() || !documentUris.isEmpty()) {
+                counter[0]++;
+                hasMedia = true;
+            }
+            if (!musicMessageObjects.isEmpty()) {
+                counter[0]++;
+                hasMedia = true;
+            }
+
+            final Runnable afterMediaSendPrepared = () -> {
+                if (!documentInfos.isEmpty() || !documentUris.isEmpty()) {
+                    SendMessagesHelper.prepareSendingDocuments(accountInstance, documentInfos, originalPaths, documentUris, null, null, null, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, null, notify, scheduleDate, 0, null, quickReplyShortcut, quickReplyShortcutId, 0, false, payStars, monoForumPeerId, suggestionParams, pollSendParams, documentPollIndex, documentUrisPollIndex, false);
+                }
+            };
+
+            final Runnable afterMusicSendPrepared = () -> {
+                if (!mediaInfos.isEmpty()) {
+                    counter[0]--;
+                    SendMessagesHelper.prepareSendingMedia(accountInstance, mediaInfos, dialogId, replyToMsg, replyToTopMsg, storyItem, quote, false, true, null, notify, scheduleDate, 0, 0, false, null, quickReplyShortcut, quickReplyShortcutId, 0, false, payStars, monoForumPeerId, suggestionParams, pollSendParams, counter[0] > 0);
+                    mediaSendQueue.postRunnable(() -> AndroidUtilities.runOnUIThread(afterMediaSendPrepared));
+                } else {
+                    afterMediaSendPrepared.run();
+                }
+            };
+
+            if (!musicMessageObjects.isEmpty()) {
+                counter[0]--;
+                SendMessagesHelper.prepareSendingAudioDocuments(accountInstance, musicMessageObjects, "", dialogId, replyToMsg, replyToTopMsg, storyItem, notify, scheduleDate, 0, null, quickReplyShortcut, quickReplyShortcutId, 0, false, payStars, pollSendParams, musicPollIndex, counter[0] > 0, afterMusicSendPrepared);
+            } else {
+                afterMusicSendPrepared.run();
+            }
+
+            if (hasMedia) {
+                return;
+            }
+        }
+
+        final SendMessagesHelper.SendMessageParams params2 = SendMessagesHelper.SendMessageParams.of(pollSendParams.poll, dialogId, replyToMsg, replyToTopMsg, null, null, notify, scheduleDate, 0);
+        params2.caption = pollSendParams.caption;
+        params2.invert_media = true;
+        params2.entities = pollSendParams.entities;
+        params2.quick_reply_shortcut = quickReplyShortcut;
+        params2.quick_reply_shortcut_id = quickReplyShortcutId;
+        params2.payStars = payStars;
+        params2.monoForumPeer = monoForumPeerId;
+        params2.suggestionParams = suggestionParams;
+        params2.pollSendParams = pollSendParams;
+        accountInstance.getSendMessagesHelper().sendMessage(params2);
     }
 
     public static void fillVideoAttribute(String videoPath, TLRPC.TL_documentAttributeVideo attributeVideo, VideoEditedInfo videoEditedInfo) {
@@ -10527,9 +11298,12 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         public TLRPC.TL_document document;
         public TLRPC.TL_game game;
         public TLRPC.TL_messageMediaPoll poll;
+        public PollSendParams pollSendParams;
+        public int pollIndex;
         public TLRPC.TL_messageMediaToDo todo;
         public TLRPC.TL_messageMediaInvoice invoice;
         public TLRPC.TL_messageMediaWebPage mediaWebPage;
+        public TL_iv.TL_inputRichMessage inputRichMessage;
         public TLRPC.PhotoSize cover;
         public long peer;
         public String path;
@@ -10561,6 +11335,12 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         public long monoForumPeer;
         public boolean sendingHighQuality;
         public MessageSuggestionParams suggestionParams;
+
+        public static SendMessageParams ofRichMessage(TL_iv.TL_inputRichMessage inputRichMessage, long peer, MessageObject replyToMsg, MessageObject replyToTopMsg, TLRPC.ReplyMarkup replyMarkup, HashMap<String, String> params, boolean notify, int scheduleDate, int scheduleRepeatPeriod) {
+            SendMessageParams p = of(null, null, null, null, null, null, null, null, null, null, peer, null, replyToMsg, replyToTopMsg, null, true, null, null, replyMarkup, params, notify, scheduleDate, scheduleRepeatPeriod, 0, null, null, false);
+            p.inputRichMessage = inputRichMessage;
+            return p;
+        }
 
         public static SendMessageParams of(String string, long dialogId) {
             return of(string, null, null, null, null, null, null, null, null, null, dialogId, null, null, null, null, true, null, null, null, null, false, 0, 0, 0, null, null, false);
@@ -10657,17 +11437,17 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
     }
 
     public TLRPC.Message getMessageFromUpdate(TLRPC.Update u) {
-        if (u instanceof TLRPC.TL_updateNewMessage) {
-            return ((TLRPC.TL_updateNewMessage) u).message;
+        if (u instanceof TL_update.TL_updateNewMessage) {
+            return ((TL_update.TL_updateNewMessage) u).message;
         }
-        if (u instanceof TLRPC.TL_updateNewChannelMessage) {
-            return ((TLRPC.TL_updateNewChannelMessage) u).message;
+        if (u instanceof TL_update.TL_updateNewChannelMessage) {
+            return ((TL_update.TL_updateNewChannelMessage) u).message;
         }
-        if (u instanceof TLRPC.TL_updateNewScheduledMessage) {
-            return ((TLRPC.TL_updateNewScheduledMessage) u).message;
+        if (u instanceof TL_update.TL_updateNewScheduledMessage) {
+            return ((TL_update.TL_updateNewScheduledMessage) u).message;
         }
-        if (u instanceof TLRPC.TL_updateQuickReplyMessage) {
-            return ((TLRPC.TL_updateQuickReplyMessage) u).message;
+        if (u instanceof TL_update.TL_updateQuickReplyMessage) {
+            return ((TL_update.TL_updateQuickReplyMessage) u).message;
         }
         return null;
     }

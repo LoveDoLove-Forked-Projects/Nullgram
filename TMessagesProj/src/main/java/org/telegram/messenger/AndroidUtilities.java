@@ -49,8 +49,12 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Matrix;
+import android.graphics.Paint;
 import android.graphics.Point;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
@@ -6773,5 +6777,62 @@ public class AndroidUtilities {
             window.setStatusBarContrastEnforced(false);
             window.setNavigationBarContrastEnforced(false);
         }
+    }
+
+    public static <A, B> B find(List<A> array, Class<B> clazz) {
+        if (array == null) {
+            return null;
+        }
+        for (int i = 0; i < array.size(); ++i) {
+            final A obj = array.get(i);
+            if (clazz.isInstance(obj)) {
+                return clazz.cast(obj);
+            }
+        }
+        return null;
+    }
+
+    public static <A, B> B findLast(List<A> array, Class<B> clazz) {
+        if (array == null) {
+            return null;
+        }
+        for (int i = array.size() - 1; i >= 0; --i) {
+            final A obj = array.get(i);
+            if (clazz.isInstance(obj)) {
+                return clazz.cast(obj);
+            }
+        }
+        return null;
+    }
+
+    public static TLRPC.Photo findPhoto(List<TLRPC.Photo> array, long id) {
+        if (array == null) return null;
+        for (int i = 0; i < array.size(); ++i) {
+            final TLRPC.Photo photo = array.get(i);
+            if (photo != null && photo.id == id)
+                return photo;
+        }
+        return null;
+    }
+
+    public static Bitmap applyColorMatrix(Bitmap bitmap, ColorMatrix matrix) {
+        final Paint paint = new Paint();
+        paint.setColorFilter(new ColorMatrixColorFilter(matrix));
+        paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC));
+
+        final Bitmap result = Bitmap.createBitmap(bitmap.getWidth(), bitmap.getHeight(), Bitmap.Config.ARGB_8888);
+        final Canvas canvas = new Canvas(result);
+        canvas.drawBitmap(bitmap, 0, 0, paint);
+        return result;
+    }
+
+    public static TLRPC.Document findDocument(List<TLRPC.Document> array, long id) {
+        if (array == null) return null;
+        for (int i = 0; i < array.size(); ++i) {
+            final TLRPC.Document doc = array.get(i);
+            if (doc != null && doc.id == id)
+                return doc;
+        }
+        return null;
     }
 }

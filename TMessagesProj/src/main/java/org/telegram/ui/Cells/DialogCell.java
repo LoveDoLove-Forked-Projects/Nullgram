@@ -1629,6 +1629,7 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
                             if (
                                 isSavedDialog && user != null && !user.self && message != null && message.isOutOwner() ||
                                 triedMessageName != null ||
+                                message != null && message.messageOwner != null && message.messageOwner.guestchat_via_from != null ||
                                 chat != null && chat.id > 0 && (fromChat == null || fromChat.id != chat.id) && (!ChatObject.isChannel(chat) || ChatObject.isMegagroup(chat)) && !ForumUtilities.isTopicCreateMessage(message) ||
                                 user != null && user.id == UserObject.VERIFY && message != null && message.getForwardedFromId() != null
                             ) {
@@ -5547,6 +5548,8 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
                 }
                 stringBuilder = formatInternal(messageFormatType, charSequence, messageNameString);
             }
+        } else if (message.messageOwner.rich_message != null) {
+            return formatInternal(messageFormatType, message.messageText, messageNameString);
         } else if (message.messageOwner.media != null && !message.isMediaEmpty()) {
             currentMessagePaint = Theme.dialogs_messagePrintingPaint[paintIndex];
             CharSequence innerMessage;

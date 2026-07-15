@@ -28,6 +28,7 @@ import org.telegram.tgnet.TLRPC;
 import org.telegram.tgnet.Vector;
 import org.telegram.tgnet.tl.TL_account;
 import org.telegram.tgnet.tl.TL_bots;
+import org.telegram.tgnet.tl.TL_iv;
 import org.telegram.tgnet.tl.TL_stories;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Stories.StoriesController;
@@ -254,6 +255,19 @@ public class FileRefController extends BaseController {
                 return new Pair<>(location, "file_" + mediaDocument.id.id);
             } else if (req.media instanceof TLRPC.TL_inputMediaPhoto) {
                 TLRPC.TL_inputMediaPhoto mediaPhoto = (TLRPC.TL_inputMediaPhoto) req.media;
+                final TLRPC.InputFileLocation location = new TLRPC.TL_inputPhotoFileLocation();
+                location.id = mediaPhoto.id.id;
+                return new Pair<>(location, "photo_" + mediaPhoto.id.id);
+            }
+        } else if (args[0] instanceof TLRPC.TL_messages_addPollAnswer) {
+            TLRPC.TL_messages_addPollAnswer req = (TLRPC.TL_messages_addPollAnswer) args[0];
+            if (req.answer.input_media instanceof TLRPC.TL_inputMediaDocument) {
+                TLRPC.TL_inputMediaDocument mediaDocument = (TLRPC.TL_inputMediaDocument) req.answer.input_media;
+                final TLRPC.InputFileLocation location = new TLRPC.TL_inputDocumentFileLocation();
+                location.id = mediaDocument.id.id;
+                return new Pair<>(location, "file_" + mediaDocument.id.id);
+            } else if (req.answer.input_media instanceof TLRPC.TL_inputMediaPhoto) {
+                TLRPC.TL_inputMediaPhoto mediaPhoto = (TLRPC.TL_inputMediaPhoto) req.answer.input_media;
                 final TLRPC.InputFileLocation location = new TLRPC.TL_inputPhotoFileLocation();
                 location.id = mediaPhoto.id.id;
                 return new Pair<>(location, "photo_" + mediaPhoto.id.id);
@@ -782,6 +796,22 @@ public class FileRefController extends BaseController {
                 mediaPhoto.id.file_reference = file_reference;
             }
             AndroidUtilities.runOnUIThread(() -> getSendMessagesHelper().performSendMessageRequest((TLObject) requester.args[0], (MessageObject) requester.args[1], (String) requester.args[2], (SendMessagesHelper.DelayedMessage) requester.args[3], (Boolean) requester.args[4], (SendMessagesHelper.DelayedMessage) requester.args[5], null, null, (Boolean) requester.args[6]));
+        } else if (requester.args[0] instanceof TLRPC.TL_messages_addPollAnswer) {
+            TLRPC.TL_messages_addPollAnswer req = (TLRPC.TL_messages_addPollAnswer) requester.args[0];
+            if (req.answer.input_media instanceof TLRPC.TL_inputMediaDocument) {
+                TLRPC.TL_inputMediaDocument mediaDocument = (TLRPC.TL_inputMediaDocument) req.answer.input_media;
+                if (fromCache && isSameReference(mediaDocument.id.file_reference, file_reference)) {
+                    return false;
+                }
+                mediaDocument.id.file_reference = file_reference;
+            } else if (req.answer.input_media instanceof TLRPC.TL_inputMediaPhoto) {
+                TLRPC.TL_inputMediaPhoto mediaPhoto = (TLRPC.TL_inputMediaPhoto) req.answer.input_media;
+                if (fromCache && isSameReference(mediaPhoto.id.file_reference, file_reference)) {
+                    return false;
+                }
+                mediaPhoto.id.file_reference = file_reference;
+            }
+            AndroidUtilities.runOnUIThread(() -> getSendMessagesHelper().performSendMessageRequest((TLObject) requester.args[0], (MessageObject) requester.args[1], (String) requester.args[2], (SendMessagesHelper.DelayedMessage) requester.args[3], (Boolean) requester.args[4], (SendMessagesHelper.DelayedMessage) requester.args[5], null, null, (Boolean) requester.args[6]));
         } else if (requester.args[0] instanceof TLRPC.TL_messages_saveGif) {
             TLRPC.TL_messages_saveGif req = (TLRPC.TL_messages_saveGif) requester.args[0];
             if (fromCache && isSameReference(req.id.file_reference, file_reference)) {
@@ -883,7 +913,7 @@ public class FileRefController extends BaseController {
                 multiMediaCache.remove(req);
                 AndroidUtilities.runOnUIThread(() -> getSendMessagesHelper().performSendMessageRequestMulti(req, (ArrayList<MessageObject>) objects[1], (ArrayList<String>) objects[2], null, (SendMessagesHelper.DelayedMessage) objects[4], (Boolean) objects[5]));
             }
-        } else if (args[0] instanceof TLRPC.TL_messages_sendMedia && !(((TLRPC.TL_messages_sendMedia) args[0]).media instanceof TLRPC.TL_inputMediaPaidMedia) || args[0] instanceof TLRPC.TL_messages_editMessage) {
+        } else if (args[0] instanceof TLRPC.TL_messages_sendMedia && !(((TLRPC.TL_messages_sendMedia) args[0]).media instanceof TLRPC.TL_inputMediaPaidMedia) && !(((TLRPC.TL_messages_sendMedia) args[0]).media instanceof TLRPC.TL_inputMediaPoll) || args[0] instanceof TLRPC.TL_messages_editMessage || args[0] instanceof TLRPC.TL_messages_addPollAnswer) {
             AndroidUtilities.runOnUIThread(() -> getSendMessagesHelper().performSendMessageRequest((TLObject) args[0], (MessageObject) args[1], (String) args[2], (SendMessagesHelper.DelayedMessage) args[3], (Boolean) args[4], (SendMessagesHelper.DelayedMessage) args[5], null, null, (Boolean) args[6]));
         } else if (args[0] instanceof TLRPC.TL_messages_saveGif) {
             TLRPC.TL_messages_saveGif req = (TLRPC.TL_messages_saveGif) args[0];
@@ -1020,6 +1050,8 @@ public class FileRefController extends BaseController {
                             if (result == null && message.media.video_cover != null) {
                                 result = getFileReference(message.media.video_cover, requester.location, needReplacement, locationReplacement);
                             }
+                        } else if (message.rich_message != null) {
+                            result = getFileReferenceForRichMessage(message.rich_message, requester.location, needReplacement, locationReplacement);
                         } else if (message.action instanceof TLRPC.TL_messageActionChatEditPhoto || message.action instanceof TLRPC.TL_messageActionSuggestProfilePhoto) {
                             result = getFileReference(message.action.photo, requester.location, needReplacement, locationReplacement);
                         }
@@ -1725,6 +1757,21 @@ public class FileRefController extends BaseController {
                 }
                 mediaPhoto.id.file_reference = file_reference;
             }
+        } else if (args[0] instanceof TLRPC.TL_messages_addPollAnswer) {
+            TLRPC.TL_messages_addPollAnswer req = (TLRPC.TL_messages_addPollAnswer) args[0];
+            if (req.answer.input_media instanceof TLRPC.TL_inputMediaDocument) {
+                TLRPC.TL_inputMediaDocument mediaDocument = (TLRPC.TL_inputMediaDocument) req.answer.input_media;
+                if (isSameReference(mediaDocument.id.file_reference, file_reference)) {
+                    return false;
+                }
+                mediaDocument.id.file_reference = file_reference;
+            } else if (req.answer.input_media instanceof TLRPC.TL_inputMediaPhoto) {
+                TLRPC.TL_inputMediaPhoto mediaPhoto = (TLRPC.TL_inputMediaPhoto) req.answer.input_media;
+                if (isSameReference(mediaPhoto.id.file_reference, file_reference)) {
+                    return false;
+                }
+                mediaPhoto.id.file_reference = file_reference;
+            }
         } else if (args[0] instanceof TLRPC.TL_messages_saveGif) {
             TLRPC.TL_messages_saveGif req = (TLRPC.TL_messages_saveGif) args[0];
             if (isSameReference(req.id.file_reference, file_reference)) {
@@ -1885,6 +1932,20 @@ public class FileRefController extends BaseController {
             cachedResult.firstQueryTime = System.currentTimeMillis();
             responseCache.put(key, cachedResult);
         }
+    }
+
+    private byte[] getFileReferenceForRichMessage(TL_iv.RichMessage richMessage, TLRPC.InputFileLocation location, boolean[] needReplacement, TLRPC.InputFileLocation[] locationReplacement) {
+        if (richMessage == null) return null;
+        byte[] result = null;
+        for (TLRPC.Photo photo : richMessage.photos) {
+            result = getFileReference(photo, location, needReplacement, locationReplacement);
+            if (result != null) return result;
+        }
+        for (TLRPC.Document document : richMessage.documents) {
+            result = getFileReference(document, null, location, needReplacement, locationReplacement);
+            if (result != null) return result;
+        }
+        return result;
     }
 
     private byte[] getFileReference(TLRPC.Document document, ArrayList<TLRPC.Document> alt_documents, TLRPC.InputFileLocation location, boolean[] needReplacement, TLRPC.InputFileLocation[] replacement) {

@@ -88,10 +88,8 @@ public class RadialProgress2 {
         overlayImageView.setInvalidateAll(true);
 
         mediaActionDrawable = new MediaActionDrawable();
-        mediaActionDrawable.setDelegate(parentView::invalidate);
 
         miniMediaActionDrawable = new MediaActionDrawable();
-        miniMediaActionDrawable.setDelegate(parentView::invalidate);
         miniMediaActionDrawable.setMini(true);
         miniMediaActionDrawable.setIcon(MediaActionDrawable.ICON_NONE, false);
 
@@ -99,6 +97,18 @@ public class RadialProgress2 {
         overlayImageView.setRoundRadius(circleRadius);
 
         overlayPaint.setColor(0x64000000);
+
+        if (parentView != null) {
+            mediaActionDrawable.setDelegate(parentView::invalidate);
+            miniMediaActionDrawable.setDelegate(parentView::invalidate);
+        }
+    }
+
+    public void setParent(View parent) {
+        this.parent = parent;
+        overlayImageView.setParentView(parent);
+        mediaActionDrawable.setDelegate(parent::invalidate);
+        miniMediaActionDrawable.setDelegate(parent::invalidate);
     }
 
     public void setResourcesProvider(Theme.ResourcesProvider resourcesProvider) {
@@ -244,10 +254,12 @@ public class RadialProgress2 {
             return;
         }
         mediaActionDrawable.setIcon(icon, animated);
-        if (!animated) {
-            parent.invalidate();
-        } else {
-            invalidateParent();
+        if (parent != null) {
+            if (!animated) {
+                parent.invalidate();
+            } else {
+                invalidateParent();
+            }
         }
     }
 
