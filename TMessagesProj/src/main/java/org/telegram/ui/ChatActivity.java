@@ -12557,12 +12557,14 @@ public class ChatActivity extends BaseFragment implements
                     onEditTextDialogClose(false, false);
                 }
             };
+            chatAttachAlert.allowLivePhotos = true;
             chatAttachAlert.setDelegate(new ChatAttachAlert.ChatAttachViewDelegate() {
                 @Override
                 public void didPressedButton(int button, boolean arg, boolean notify, int scheduleDate, int scheduleRepeatPeriod, long effectId, boolean invertMedia, boolean forceDocument, long payStars) {
                     if (getParentActivity() == null || chatAttachAlert == null) {
                         return;
                     }
+                    final boolean isStickerMode = chatAttachAlert.isStickerMode;
                     editingMessageObject = chatAttachAlert.getEditingMessageObject();
                     if (editingMessageObject != null && editingMessageObject.messageOwner != null) {
                         editingMessageObject.messageOwner.invert_media = invertMedia;
@@ -12585,9 +12587,16 @@ public class ChatActivity extends BaseFragment implements
                                     MediaController.PhotoEntry photoEntry = (MediaController.PhotoEntry) selectedPhotos.get(selectedPhotosOrder.get(i * 10 + a));
 
                                     SendMessagesHelper.SendingMediaInfo info = new SendMessagesHelper.SendingMediaInfo();
-                                    if (!photoEntry.isVideo && photoEntry.imagePath != null) {
+                                    info.imagePath = photoEntry.imagePath;
+                                    info.isLivePhoto = photoEntry.isLivePhoto();
+                                    boolean isVideo = photoEntry.isVideo;
+                                    if (isStickerMode && info.isLivePhoto) {
+                                        info.isLivePhoto = false;
+                                        isVideo = false;
+                                    }
+                                    if (!isVideo && photoEntry.imagePath != null) {
                                         info.path = photoEntry.imagePath;
-                                        if (photoEntry.highQuality) {
+                                        if (photoEntry.isHighQuality()) {
                                             info.originalPhotoEntry = photoEntry.clone();
                                         }
                                     } else if (photoEntry.path != null) {
@@ -12596,7 +12605,10 @@ public class ChatActivity extends BaseFragment implements
                                     info.thumbPath = photoEntry.thumbPath;
                                     info.coverPath = photoEntry.coverPath;
                                     info.coverPhoto = photoEntry.coverPhoto;
-                                    info.isVideo = photoEntry.isVideo;
+                                    info.isVideo = isVideo;
+                                    info.discardLivePhoto = photoEntry.isUnalivePhoto();
+                                    info.livePhotoVideoOffset = photoEntry.livePhotoVideoOffset;
+                                    info.livePhotoTimestampUs = photoEntry.livePhotoTimestampUs;
                                     info.caption = photoEntry.caption != null ? photoEntry.caption.toString() : null;
                                     info.entities = photoEntry.entities;
                                     info.masks = photoEntry.stickers;
@@ -12606,7 +12618,7 @@ public class ChatActivity extends BaseFragment implements
                                     info.updateStickersOrder = SendMessagesHelper.checkUpdateStickersOrder(photoEntry.caption);
                                     info.hasMediaSpoilers = photoEntry.hasSpoiler;
                                     info.stars = photoEntry.starsAmount;
-                                    info.highQuality = photoEntry.highQuality;
+                                    info.highQuality = photoEntry.isHighQuality();
                                     photos.add(info);
                                     photoEntry.reset();
                                 }
@@ -15048,7 +15060,7 @@ public class ChatActivity extends BaseFragment implements
                 forbidForwardingWithDismiss = false;
                 chatActivityEnterView.setForceShowSendButton(true, false);
                 ArrayList<Long> uids = new ArrayList<>();
-                replyIconImageView.setImageResource(R.drawable.filled_forward);
+                replyIconImageView.setImageResource(R.drawable.filled_forward_settings);
                 replyIconImageView.setContentDescription(LocaleController.getString(R.string.AccDescrForwarding));
                 replyCloseImageView.setContentDescription(LocaleController.getString(R.string.AccDescrCancelForward));
                 MessageObject object = messageObjectsToForward.get(0);
@@ -19652,7 +19664,7 @@ public class ChatActivity extends BaseFragment implements
         }
     }
 
-    public void openVideoEditor(String videoPath, String caption) {
+    public void openVideoEditor(String videoPath, CharSequence caption) {
         if (getParentActivity() != null) {
             final Bitmap thumb = SendMessagesHelper.createVideoThumbnail(videoPath, MediaStore.Video.Thumbnails.MINI_KIND);
             PhotoViewer.getInstance().setParentActivity(this, themeDelegate);
@@ -19793,13 +19805,18 @@ public class ChatActivity extends BaseFragment implements
                 }
                 info.thumbPath = entry.thumbPath;
                 info.coverPath = entry.coverPath;
+                info.isLivePhoto = entry.isLivePhoto();
                 info.isVideo = entry.isVideo;
+                info.discardLivePhoto = entry.isUnalivePhoto();
+                info.livePhotoVideoOffset = entry.livePhotoVideoOffset;
+                info.livePhotoTimestampUs = entry.livePhotoTimestampUs;
                 info.caption = entry.caption != null ? entry.caption.toString() : null;
                 info.entities = entry.entities;
                 info.masks = entry.stickers;
                 info.ttl = entry.ttl;
                 info.videoEditedInfo = entry.editedInfo;
                 info.canDeleteAfter = entry.canDeleteAfter;
+                info.highQuality = entry.isHighQuality();
                 photos.add(info);
                 entry.reset();
             }
@@ -32711,6 +32728,25 @@ public class ChatActivity extends BaseFragment implements
         if (TextUtils.isEmpty(path)) {
             return;
         }
+        if (messageObject.isLivePhoto()) {
+            final TLRPC.Document videoDoc = MessageObject.getMedia(messageObject.messageOwner) != null
+                    ? MessageObject.getMedia(messageObject.messageOwner).document
+                    : null;
+            String videoPath = null;
+            if (videoDoc != null) {
+                File videoFile = FileLoader.getInstance(currentAccount).getPathToAttach(videoDoc, false);
+                if (videoFile == null || !videoFile.exists()) {
+                    videoFile = FileLoader.getInstance(currentAccount).getPathToAttach(videoDoc, true);
+                }
+                if (videoFile != null && videoFile.exists()) {
+                    videoPath = videoFile.getPath();
+                }
+            }
+            if (!TextUtils.isEmpty(videoPath)) {
+                MediaController.saveFile(path, videoPath, getParentActivity(), null);
+                return;
+            }
+        }
         MediaController.saveFile(path, getParentActivity(), messageObject.isVideo() ? 1 : 0, null, null);
     }
 
@@ -32922,7 +32958,7 @@ public class ChatActivity extends BaseFragment implements
                 } else {
                     saveMessageToGallery(selectedObject);
                     if (getParentActivity() != null) {
-                        BulletinFactory.of(this).createDownloadBulletin(selectedObject.isVideo() ? BulletinFactory.FileType.VIDEO : BulletinFactory.FileType.PHOTO, themeDelegate).show();
+                        BulletinFactory.of(this).createDownloadBulletin(selectedObject.isLivePhoto() ? BulletinFactory.FileType.LIVEPHOTO : (selectedObject.isVideo() ? BulletinFactory.FileType.VIDEO : BulletinFactory.FileType.PHOTO), themeDelegate).show();
                     }
                 }
                 break;
@@ -33053,8 +33089,28 @@ public class ChatActivity extends BaseFragment implements
                 if (TextUtils.isEmpty(path)) {
                     return;
                 }
+                if (selectedObject.isLivePhoto()) {
+                    final TLRPC.Document videoDoc = MessageObject.getMedia(selectedObject.messageOwner) != null
+                            ? MessageObject.getMedia(selectedObject.messageOwner).document
+                            : null;
+                    String videoPath = null;
+                    if (videoDoc != null) {
+                        File videoFile = FileLoader.getInstance(currentAccount).getPathToAttach(videoDoc, false);
+                        if (videoFile == null || !videoFile.exists()) {
+                            videoFile = FileLoader.getInstance(currentAccount).getPathToAttach(videoDoc, true);
+                        }
+                        if (videoFile != null && videoFile.exists()) {
+                            videoPath = videoFile.getPath();
+                        }
+                    }
+                    if (!TextUtils.isEmpty(videoPath)) {
+                        MediaController.saveFile(path, videoPath, getParentActivity(), null);
+                        BulletinFactory.createSaveToGalleryBulletin(this, false, true, themeDelegate).show();
+                        break;
+                    }
+                }
                 MediaController.saveFile(path, getParentActivity(), 0, null, null);
-                BulletinFactory.createSaveToGalleryBulletin(this, selectedObject.isVideo(), themeDelegate).show();
+                BulletinFactory.createSaveToGalleryBulletin(this, selectedObject.isVideo() && !selectedObject.isLivePhoto(), selectedObject.isLivePhoto(), themeDelegate).show();
                 break;
             }
             case OPTION_REPLY: {
@@ -33122,6 +33178,17 @@ public class ChatActivity extends BaseFragment implements
                         }
                         if (count > 0) {
                             BulletinFactory.of(this).createDownloadBulletin(isMusic ? BulletinFactory.FileType.AUDIOS : BulletinFactory.FileType.UNKNOWNS, count, themeDelegate).show();
+                        }
+                    });
+                } else if (selectedObject.isLivePhoto()) {
+                    final ArrayList<MessageObject> messageObjects = new ArrayList<>();
+                    messageObjects.add(selectedObject);
+                    MediaController.saveFilesFromMessages(getParentActivity(), getAccountInstance(), messageObjects, (count) -> {
+                        if (getParentActivity() == null || fragmentView == null) {
+                            return;
+                        }
+                        if (count > 0) {
+                            BulletinFactory.of(this).createDownloadBulletin(BulletinFactory.FileType.LIVEPHOTO, count, themeDelegate).show();
                         }
                     });
                 } else {

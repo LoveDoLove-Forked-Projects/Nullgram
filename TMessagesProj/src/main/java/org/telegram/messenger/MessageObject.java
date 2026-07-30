@@ -5867,6 +5867,8 @@ public class MessageObject {
                         messageText = getString(R.string.AttachDestructingPhoto);
                     } else if (getGroupId() != 0) {
                         messageText = getString(R.string.Album);
+                    } else if (isLivePhoto()) {
+                        messageText = getString(R.string.AttachLivePhoto);
                     } else {
                         messageText = getString(R.string.AttachPhoto);
                     }
@@ -6300,6 +6302,8 @@ public class MessageObject {
                 return getString(R.string.AttachDestructingPhoto);
             } else if (getGroupId() != 0) {
                 return getString(R.string.Album);
+            } else if (isLivePhoto()) {
+                return getString(R.string.AttachLivePhoto);
             } else {
                 return getString(R.string.AttachPhoto);
             }
@@ -10218,6 +10222,10 @@ public class MessageObject {
         return getMedia(message) != null ? getMedia(message).document : null;
     }
 
+    public TLRPC.Photo getPhoto() {
+        return getPhoto(messageOwner);
+    }
+
     public static TLRPC.Photo getPhoto(TLRPC.Message message) {
         if (message != null && message.rich_message != null) {
             return findPhoto(message.rich_message);
@@ -10846,6 +10854,11 @@ public class MessageObject {
 
     public boolean isVideo() {
         return isVideoMessage(messageOwner);
+    }
+
+    public boolean isLivePhoto() {
+        final TLRPC.MessageMedia media = getMedia(this);
+        return media != null && media.live_photo;
     }
 
     public boolean isVideoStory() {

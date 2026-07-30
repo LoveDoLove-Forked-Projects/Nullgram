@@ -44,14 +44,6 @@ Android NDK rev.21とAndroid SDK 14が必要です。
 5. https://console.firebase.google.com/ にアクセスしてアプリIDを`top.qwq2333.nullgram`でAndroidアプリを1つ作成してfirebase messagingをONにし、google-services.jsonをダウンロードしてTMessagesProjと同じフォルダにコピーしてください。
 6. ターミナルを開いて`./gradlew assembleRelease`を実行してAPKをビルドしてください。
 
-## スポンサー
-
-IDEに無料のオープンソースライセンスを割り当ててくれたJetbrainsとOSSのスポンサーになって頂いたCloudFlareに感謝をします。
-
-[<img src="docs/jetbrains-variant-3.png" width="200"/>](https://jb.gg/OpenSource)
-[<img src="docs/CF_logomark.svg" width="200"/>](https://www.cloudflare.com/)
-
-
 [^1]: https://telegra.ph/%E6%9C%89%E5%85%B3-Nekogram-Lite-%E7%9A%84%E6%95%85%E4%BA%8B-04-09
 
 [^2]:https://sm.ms/image/FAKi3mx6XwqlvRj

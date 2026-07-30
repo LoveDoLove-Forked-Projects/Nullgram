@@ -342,6 +342,8 @@ public class SharedConfig {
     public static int emojiInteractionsHintCount;
     public static int dayNightThemeSwitchHintCount;
     public static int callEncryptionHintDisplayedCount;
+    public static boolean photoHighQualityDefault;
+    public static boolean photoLiveDefault;
 
     public static TLRPC.TL_help_appUpdate pendingAppUpdate;
     public static int pendingAppUpdateBuildVersion;
@@ -943,6 +945,8 @@ public class SharedConfig {
             multipleReactionsPromoShowed = preferences.getBoolean("multipleReactionsPromoShowed", false);
             callEncryptionHintDisplayedCount = preferences.getInt("callEncryptionHintDisplayedCount", 0);
             debugVideoQualities = preferences.getBoolean("debugVideoQualities", false);
+            photoHighQualityDefault = preferences.getBoolean("photoHighQualityDefault", false);
+            photoLiveDefault = preferences.getBoolean("photoLiveDefault", false);
 
             loadDebugConfig(preferences);
 
