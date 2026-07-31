@@ -321,6 +321,25 @@ public class RadialProgress2 {
         return overrideAlpha;
     }
 
+    public float getWholeAlpha() {
+        final int currentIcon = mediaActionDrawable.getCurrentIcon();
+        final int prevIcon = mediaActionDrawable.getPreviousIcon();
+
+        if (backgroundStroke != 0) {
+            if (currentIcon == MediaActionDrawable.ICON_CANCEL) {
+                return 1.0f - mediaActionDrawable.getTransitionProgress();
+            } else if (prevIcon == MediaActionDrawable.ICON_CANCEL) {
+                return mediaActionDrawable.getTransitionProgress();
+            } else {
+                return 1.0f;
+            }
+        } else if ((currentIcon == MediaActionDrawable.ICON_CANCEL || currentIcon == MediaActionDrawable.ICON_CHECK || currentIcon == MediaActionDrawable.ICON_EMPTY || currentIcon == MediaActionDrawable.ICON_GIF || currentIcon == MediaActionDrawable.ICON_PLAY) && prevIcon == MediaActionDrawable.ICON_NONE) {
+            return mediaActionDrawable.getTransitionProgress();
+        } else {
+            return currentIcon != MediaActionDrawable.ICON_NONE ? 1.0f : 1.0f - mediaActionDrawable.getTransitionProgress();
+        }
+    }
+
     @Keep
     public void draw(Canvas canvas) {
         if (mediaActionDrawable.getCurrentIcon() == MediaActionDrawable.ICON_NONE && mediaActionDrawable.getTransitionProgress() >= 1.0f || progressRect.isEmpty()) {
@@ -328,22 +347,7 @@ public class RadialProgress2 {
         }
 
         int currentIcon = mediaActionDrawable.getCurrentIcon();
-        int prevIcon = mediaActionDrawable.getPreviousIcon();
-
-        float wholeAlpha;
-        if (backgroundStroke != 0) {
-            if (currentIcon == MediaActionDrawable.ICON_CANCEL) {
-                wholeAlpha = 1.0f - mediaActionDrawable.getTransitionProgress();
-            } else if (prevIcon == MediaActionDrawable.ICON_CANCEL) {
-                wholeAlpha = mediaActionDrawable.getTransitionProgress();
-            } else {
-                wholeAlpha = 1.0f;
-            }
-        } else if ((currentIcon == MediaActionDrawable.ICON_CANCEL || currentIcon == MediaActionDrawable.ICON_CHECK || currentIcon == MediaActionDrawable.ICON_EMPTY || currentIcon == MediaActionDrawable.ICON_GIF || currentIcon == MediaActionDrawable.ICON_PLAY) && prevIcon == MediaActionDrawable.ICON_NONE) {
-            wholeAlpha = mediaActionDrawable.getTransitionProgress();
-        } else {
-            wholeAlpha = currentIcon != MediaActionDrawable.ICON_NONE ? 1.0f : 1.0f - mediaActionDrawable.getTransitionProgress();
-        }
+        final float wholeAlpha = getWholeAlpha();
 
         if (isPressedMini && circleCrossfadeColorKey < 0) {
             if (iconPressedColorKey >= 0) {

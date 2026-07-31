@@ -1310,6 +1310,18 @@
     <string name="NobodyLikesSpam3">Sorry, you are currently restricted from posting to public groups.</string>
     <string name="MoreInfo">More info</string>
     <string name="ShareSendTo">Send to...</string>
+    <string name="ShareSendPhoto">Send photo</string>
+    <string name="ShareSendVideo">Send video</string>
+    <string name="ShareSendPhotos_one">Send %1$d photo</string>
+    <string name="ShareSendPhotos_other">Send %1$d photos</string>
+    <string name="ShareSendVideos_one">Send %1$d video</string>
+    <string name="ShareSendVideos_other">Send %1$d videos</string>
+    <string name="ShareSendItems_one">Send %1$d media</string>
+    <string name="ShareSendItems_other">Send %1$d media</string>
+    <string name="ShareSendToChats">To %s</string>
+    <string name="ShareSendToMany_one">To %1$d chat</string>
+    <string name="ShareSendToMany_other">To %1$d chats</string>
+    <string name="ShareTapToEditMedia">Tap here to edit media</string>
     <string name="ShareComment">Write a comment...</string>
     <string name="TapHereGifs">Tap here to access saved GIFs</string>
     <string name="TapHereEmoji">Tap %1$s to access more emoji.</string>
@@ -10384,4 +10396,16 @@
     <string name="AnswerOptions2">Options</string>
     <string name="AddAnExplanationHeader">Explanation</string>
     <string name="GuestBotFor"> for </string>
+    <string name="LivePhotoSavedHint">Motion Photo saved to gallery</string>
+    <string name="LivePhotosSavedHint_one">Motion Photo saved to gallery</string>
+    <string name="LivePhotosSavedHint_other">%1$d motion photos saved to gallery</string>
+    <string name="AttachLivePhoto">Motion Photo</string>
+    <string name="LivePhotoOn">Motion Photo **On**</string>
+    <string name="LivePhotoOff">Motion Photo **Off**</string>
+    <string name="LivePhotosOn">Motion Photos turned **On**</string>
+    <string name="LivePhotosOff">Motion Photos turned **Off**</string>
+    <string name="AccDescrLivePhoto">Live Photo</string>
+    <string name="AccDescrPostedDate">Posted %s</string>
+    <string name="AccDescrRoundVideo">Video message</string>
+    <string name="AccDescrStoryPinned">Pinned</string>
 </resources>

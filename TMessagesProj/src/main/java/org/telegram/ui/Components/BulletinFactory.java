@@ -160,6 +160,9 @@ public final class BulletinFactory {
         VIDEO("VideoSavedHint", R.string.VideoSavedHint, Icon.SAVED_TO_GALLERY),
         VIDEOS("VideosSavedHint", Icon.SAVED_TO_GALLERY),
 
+        LIVEPHOTO("LivePhotoSavedHint", R.string.LivePhotoSavedHint, Icon.SAVED_TO_GALLERY),
+        LIVEPHOTOS("LivePhotosSavedHint", Icon.SAVED_TO_GALLERY),
+
         MEDIA("MediaSavedHint", Icon.SAVED_TO_GALLERY),
 
         PHOTO_TO_DOWNLOADS("PhotoSavedToDownloadsHintLinked", R.string.PhotoSavedToDownloadsHintLinked, Icon.SAVED_TO_DOWNLOADS),
@@ -1206,6 +1209,11 @@ public final class BulletinFactory {
     }
 
     @CheckResult
+    public static Bulletin createSaveToGalleryBulletin(BaseFragment fragment, boolean video, boolean livePhoto, Theme.ResourcesProvider resourcesProvider) {
+        return of(fragment).createDownloadBulletin(livePhoto ? FileType.LIVEPHOTO : (video ? FileType.VIDEO : FileType.PHOTO), resourcesProvider);
+    }
+
+    @CheckResult
     public static Bulletin createSaveToGalleryBulletin(FrameLayout containerLayout, boolean video, Theme.ResourcesProvider resourcesProvider) {
         return of(containerLayout, resourcesProvider).createDownloadBulletin(video ? FileType.VIDEO : FileType.PHOTO, resourcesProvider);
     }
@@ -1216,8 +1224,42 @@ public final class BulletinFactory {
     }
 
     @CheckResult
+    public static Bulletin createSaveToGalleryBulletin(FrameLayout containerLayout, boolean video, boolean livePhoto, int backgroundColor, int textColor) {
+        return of(containerLayout, null).createDownloadBulletin(livePhoto ? FileType.LIVEPHOTO : (video ? FileType.VIDEO : FileType.PHOTO), 1, backgroundColor, textColor);
+    }
+
+    @CheckResult
     public static Bulletin createSaveToGalleryBulletin(FrameLayout containerLayout, int amount, boolean video, int backgroundColor, int textColor) {
         return of(containerLayout, null).createDownloadBulletin(video ? (amount > 1 ? FileType.VIDEOS : FileType.VIDEO) : (amount > 1 ? FileType.PHOTOS : FileType.PHOTO), amount, backgroundColor, textColor);
+    }
+
+    @CheckResult
+    public static Bulletin createSaveToGalleryBulletin(FrameLayout containerLayout, int amount, boolean video, boolean livePhoto, int backgroundColor, int textColor) {
+        final FileType ft;
+        if (livePhoto) {
+            ft = amount > 1 ? FileType.LIVEPHOTOS : FileType.LIVEPHOTO;
+        } else if (video) {
+            ft = amount > 1 ? FileType.VIDEOS : FileType.VIDEO;
+        } else {
+            ft = amount > 1 ? FileType.PHOTOS : FileType.PHOTO;
+        }
+        return of(containerLayout, null).createDownloadBulletin(ft, amount, backgroundColor, textColor);
+    }
+
+    @CheckResult
+    public static Bulletin createSaveMediaToGalleryBulletin(FrameLayout containerLayout, int amount, boolean hasVideo, boolean hasPhoto, boolean hasLivePhoto, int backgroundColor, int textColor) {
+        final int kinds = (hasVideo ? 1 : 0) + (hasPhoto ? 1 : 0) + (hasLivePhoto ? 1 : 0);
+        final FileType ft;
+        if (kinds > 1) {
+            ft = FileType.MEDIA;
+        } else if (hasLivePhoto) {
+            ft = amount > 1 ? FileType.LIVEPHOTOS : FileType.LIVEPHOTO;
+        } else if (hasVideo) {
+            ft = amount > 1 ? FileType.VIDEOS : FileType.VIDEO;
+        } else {
+            ft = amount > 1 ? FileType.PHOTOS : FileType.PHOTO;
+        }
+        return of(containerLayout, null).createDownloadBulletin(ft, amount, backgroundColor, textColor);
     }
 
     @CheckResult

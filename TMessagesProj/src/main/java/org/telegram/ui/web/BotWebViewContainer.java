@@ -2304,7 +2304,7 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                             progressDialog.dismissUnless(500);
                         };
                         Utilities.globalQueue.postRunnable(() -> {
-                            AnimatedFileDrawable.getVideoInfo(file.getAbsolutePath(), params);
+                            AnimatedFileDrawable.getVideoInfo(file.getAbsolutePath(), params, 0);
                             AndroidUtilities.runOnUIThread(open);
                         });
                     });

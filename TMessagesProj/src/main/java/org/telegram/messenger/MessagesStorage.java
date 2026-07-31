@@ -9626,6 +9626,7 @@ public class MessagesStorage extends BaseController {
     public static final int SENT_FILE_TYPE_VIDEO_ENCRYPTED = 5;
     public static final int SENT_FILE_TYPE_PHOTO_HIGH_QUALITY = 6;
     public static final int SENT_FILE_TYPE_PHOTO_HIGH_QUALITY_ENCRYPTED = 7;
+    public static final int SENT_FILE_TYPE_VIDEO_HIGH_QUALITY = 8;
     public Object[] getSentFile(String path, int type) {
         if (path == null || path.toLowerCase().endsWith("attheme")) {
             return null;
