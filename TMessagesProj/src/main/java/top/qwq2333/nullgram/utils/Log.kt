@@ -71,23 +71,26 @@ object Log {
 
     init {
         runCatching {
-            val parentFile = AndroidUtilities.getLogsDir()
             CoroutineScope(Dispatchers.IO).launch {
-                parentFile.listFiles()?.forEach {
-                    // delete logs older than 1 day
-                    if (it.readAttributes().creationTime().toMillis() < System.currentTimeMillis() - 1 * 24 * 60 * 60 * 1000) {
-                        it.delete()
+                runCatching {
+                    AndroidUtilities.getLogsDir().listFiles()?.forEach {
+                        runCatching {
+                            // delete logs older than 1 day
+                            if (it.readAttributes().creationTime().toMillis() < System.currentTimeMillis() - 1 * 24 * 60 * 60 * 1000) {
+                                it.delete()
+                            }
+                        }
                     }
+                    logFile.appendText(">>>> Log start at ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())}\n", Charset.forName("UTF-8"))
+                    logFile.appendText("Current version: ${BuildConfig.VERSION_NAME}\n")
+                }.onFailure {
+                    if (it is Exception && AndroidUtilities.isENOSPC(it)) {
+                        LaunchActivity.checkFreeDiscSpaceStatic(1)
+                    }
+                    Log.e(TAG, "Logger crashes", it)
                 }
             }
-            logFile.appendText(">>>> Log start at ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())}\n", Charset.forName("UTF-8"))
-            logFile.appendText("Current version: ${BuildConfig.VERSION_NAME}\n")
-
-
         }.onFailure {
-            if (it is Exception && AndroidUtilities.isENOSPC(it)) {
-                LaunchActivity.checkFreeDiscSpaceStatic(1)
-            }
             Log.e(TAG, "Logger crashes", it)
         }
     }

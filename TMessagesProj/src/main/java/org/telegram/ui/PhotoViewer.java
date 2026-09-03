@@ -14547,6 +14547,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 bottomLayout.setVisibility(View.GONE);
                 bottomLayout.setTag(null);
             }
+            menuItem.hideSubItem(gallery_menu_translate);
+            translateFromLanguage = null;
             if (isInvoice) {
                 setItemVisible(masksItem, false, animated);
                 setItemVisible(editItem, false, animated);
@@ -14556,15 +14558,18 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 allowShare = false;
 //                captionTextViewSwitcher.setTranslationY(AndroidUtilities.dp(48));
             } else {
-                menuItem.hideSubItem(gallery_menu_translate);
                 if (TranslateHelper.getCurrentStatus() != TranslateHelper.Status.External) {
                     var messageUtils = MessageUtils.getInstance(currentAccount);
                     var messageObject = messageUtils.getMessageForTranslate(newMessageObject, null);
                     if (messageObject != null) {
+                        final MessageObject finalMessageObject = newMessageObject;
                         if (!messageObject.translated && LanguageDetector.hasSupport()) {
                             LanguageDetector.detectLanguage(
                                 messageUtils.getMessagePlainText(messageObject),
                                 (String lang) -> {
+                                    if (currentMessageObject != finalMessageObject) {
+                                        return;
+                                    }
                                     translateFromLanguage = TranslateHelper.stripLanguageCode(lang);
                                     if (!TranslateHelper.isLanguageRestricted(lang)) {
                                         menuItem.showSubItem(gallery_menu_translate);
@@ -14574,7 +14579,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                         } else {
                             menuItem.showSubItem(gallery_menu_translate);
                         }
-                        translateItem.setText(newMessageObject.translated ? LocaleController.getString("UndoTranslate", R.string.UndoTranslate) : LocaleController.getString("TranslateMessage", R.string.TranslateMessage));
+                        translateItem.setText(newMessageObject.translated && newMessageObject.originalMessage != null ? LocaleController.getString("UndoTranslate", R.string.UndoTranslate) : LocaleController.getString("TranslateMessage", R.string.TranslateMessage));
                     }
                 }
 
@@ -21702,6 +21707,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             final String finalMessage = (String) currentMessageObject.originalMessage;
             currentMessageObject.messageOwner.message = finalMessage;
             currentMessageObject.translated = false;
+            currentMessageObject.originalMessage = null;
             currentMessageObject.caption = null;
             currentMessageObject.generateCaption();
 
@@ -21753,6 +21759,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 progressDialog.dismiss();
             } catch (Throwable ignore) {
             }
+            finalMessageObject.originalMessage = null;
             TranslateHelper.handleTranslationError(parentFragment, e, this::translateCaption, resourcesProvider);
             return Unit.INSTANCE;
         });

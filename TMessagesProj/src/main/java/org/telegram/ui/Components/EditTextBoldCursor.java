@@ -202,7 +202,9 @@ public class EditTextBoldCursor extends EditTextEffects {
         }
     }
 
-    public final boolean canUndo() {
+    // NOTE: must NOT be named canUndo/canRedo - TextView.canUndo() is public @hide, so that name
+    // overrides it and canUndoMethod.invoke(this) virtual-dispatches back here (StackOverflowError)
+    public final boolean hasUndo() {
         if (canUndoMethod == null) {
             return false;
         }
@@ -214,7 +216,7 @@ public class EditTextBoldCursor extends EditTextEffects {
         return false;
     }
 
-    public final boolean canRedo() {
+    public final boolean hasRedo() {
         if (canRedoMethod == null) {
             return false;
         }
@@ -1233,10 +1235,10 @@ public class EditTextBoldCursor extends EditTextEffects {
 
     private void addUndoRedo(Menu menu) {
         if (menu.findItem(android.R.id.undo) == null && menu.findItem(android.R.id.redo) == null) {
-            if (canUndo()) {
+            if (hasUndo()) {
                 menu.add(R.id.menu_undoredo, android.R.id.undo, 2, LocaleController.getString("EditUndo", R.string.EditUndo));
             }
-            if (canRedo()) {
+            if (hasRedo()) {
                 menu.add(R.id.menu_undoredo, android.R.id.redo, 3, LocaleController.getString("EditRedo", R.string.EditRedo));
             }
         }

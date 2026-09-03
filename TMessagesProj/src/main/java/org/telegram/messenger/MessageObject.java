@@ -7764,20 +7764,22 @@ public class MessageObject {
     }
 
     public ArrayList<TLRPC.MessageEntity> getEntities() {
-        if (messageOwner == null) return null;
-        if (summarized) {
-            if (translated && messageOwner.translatedSummaryText != null) {
-                return messageOwner.translatedSummaryText.entities;
-            } else if (messageOwner.summaryText != null) {
-                return messageOwner.summaryText.entities;
-            }
-            return null;
-        }
-        if (translated) {
-            if (messageOwner.voiceTranscriptionOpen) {
-                return messageOwner.translatedVoiceTranscription != null ? messageOwner.translatedVoiceTranscription.entities : null;
-            } else {
-                return messageOwner.translatedText != null ? messageOwner.translatedText.entities : null;
+        if (messageOwner == null) return new ArrayList<>();
+        if (originalMessage == null) {
+            if (summarized) {
+                if (translated && messageOwner.translatedSummaryText != null) {
+                    return messageOwner.translatedSummaryText.entities;
+                } else if (messageOwner.summaryText != null) {
+                    return messageOwner.summaryText.entities;
+                }
+            } else if (translated) {
+                if (messageOwner.voiceTranscriptionOpen) {
+                    if (messageOwner.translatedVoiceTranscription != null) {
+                        return messageOwner.translatedVoiceTranscription.entities;
+                    }
+                } else if (messageOwner.translatedText != null) {
+                    return messageOwner.translatedText.entities;
+                }
             }
         }
         return messageOwner.entities;
@@ -8318,7 +8320,8 @@ public class MessageObject {
         if (messageOwner.send_state != MESSAGE_SEND_STATE_SENT) {
             hasEntities = false;
         } else {
-            hasEntities = !getEntities().isEmpty();
+            final ArrayList<TLRPC.MessageEntity> entities = getEntities();
+            hasEntities = entities != null && !entities.isEmpty();
         }
 
         boolean useManualParse = !hasEntities && (

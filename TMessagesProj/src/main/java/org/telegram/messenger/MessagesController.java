@@ -5551,7 +5551,7 @@ public class MessagesController extends BaseController implements NotificationCe
                 final SharedPreferences.Editor editor = mainPreferences.edit();
                 editor.putStringSet("pendingSuggestions", pendingSuggestions);
                 editor.putStringSet("dismissedSuggestions", dismissedSuggestions);
-                editor.commit();
+                editor.apply();
                 getNotificationCenter().postNotificationName(NotificationCenter.newSuggestionsAvailable);
             } else {
                 return;
@@ -5707,7 +5707,7 @@ public class MessagesController extends BaseController implements NotificationCe
             editor.putString("suggestedLangCode", suggestedLangCode);
             editor.putBoolean("forceTryIpV6", forceTryIpV6);
             editor.putString("autologinToken", autologinToken = config.autologin_token);
-            editor.commit();
+            editor.apply();
 
             getConnectionsManager().setForceTryIpV6(forceTryIpV6);
             LocaleController.getInstance().checkUpdateForCurrentRemoteLocale(currentAccount, config.lang_pack_version, config.base_lang_pack_version);
@@ -10548,7 +10548,7 @@ public class MessagesController extends BaseController implements NotificationCe
                     editor.remove("promo_psa_type");
                 }
                 editor.putInt("nextPromoInfoCheckTime", nextPromoInfoCheckTime);
-                editor.commit();
+                editor.apply();
 
                 if (!noDialog) {
                     AndroidUtilities.runOnUIThread(() -> {

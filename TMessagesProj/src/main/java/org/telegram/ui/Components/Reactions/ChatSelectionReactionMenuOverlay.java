@@ -318,13 +318,14 @@ public class ChatSelectionReactionMenuOverlay extends FrameLayout {
     }
 
     private boolean isMessageTypeAllowed(MessageObject obj) {
-        return obj != null && !obj.needDrawBluredPreview() && (
-            MessageObject.isPhoto(obj.messageOwner) && MessageObject.getMedia(obj.messageOwner).webpage == null ||
+        if (obj == null || obj.messageOwner == null || obj.needDrawBluredPreview()) {
+            return false;
+        }
+        return MessageObject.getMedia(obj.messageOwner) instanceof TLRPC.TL_messageMediaPhoto ||
             obj.getDocument() != null && (
                 MessageObject.isVideoDocument(obj.getDocument()) ||
                 MessageObject.isGifDocument(obj.getDocument())
-            )
-        );
+            );
     }
 
     public void setSelectedMessages(List<MessageObject> messages) {

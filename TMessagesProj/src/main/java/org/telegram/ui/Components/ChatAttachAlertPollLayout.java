@@ -601,7 +601,7 @@ public class ChatAttachAlertPollLayout extends ChatAttachAlert.AttachAlertLayout
                 int count = listView.getChildCount();
                 for (int a = answerStartRow; a < answerStartRow + answersCount; a++) {
                     RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(a);
-                    if (holder != null && holder.itemView instanceof PollEditTextCell) {
+                    if (holder != null && holder.getItemViewType() == ListAdapter.VIEW_TYPE_ANSWER) {
                         PollEditTextCell pollEditTextCell = (PollEditTextCell) holder.itemView;
                         pollEditTextCell.setShowCheckBox(quizPoll, true);
                         pollEditTextCell.setChecked(answersChecks[a - answerStartRow], wasChecksBefore);
@@ -1076,7 +1076,7 @@ public class ChatAttachAlertPollLayout extends ChatAttachAlert.AttachAlertLayout
 
     private void showMediaHint(int index) {
         final RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(answerStartRow + index);
-        if (holder != null && holder.itemView instanceof PollEditTextCell) {
+        if (holder != null && holder.getItemViewType() == ListAdapter.VIEW_TYPE_ANSWER) {
             PollEditTextCell pollEditTextCell = (PollEditTextCell) holder.itemView;
             if (pollEditTextCell.getTop() > AndroidUtilities.dp(40)) {
                 if (suggestEmojiPanel != null) {
@@ -1093,7 +1093,7 @@ public class ChatAttachAlertPollLayout extends ChatAttachAlert.AttachAlertLayout
     private void showQuizHint() {
         for (int a = answerStartRow; a < answerStartRow + answersCount; a++) {
             RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(a);
-            if (holder != null && holder.itemView instanceof PollEditTextCell) {
+            if (holder != null && holder.getItemViewType() == ListAdapter.VIEW_TYPE_ANSWER) {
                 PollEditTextCell pollEditTextCell = (PollEditTextCell) holder.itemView;
                 if (pollEditTextCell.getTop() > AndroidUtilities.dp(40)) {
                     if (suggestEmojiPanel != null) {

@@ -227,17 +227,21 @@ public class ApplicationLoader extends Application {
             BroadcastReceiver networkStateReceiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
-                    try {
-                        currentNetworkInfo = connectivityManager.getActiveNetworkInfo();
-                    } catch (Throwable ignore) {
+                    Utilities.globalQueue.postRunnable(() -> {
+                        try {
+                            currentNetworkInfo = connectivityManager.getActiveNetworkInfo();
+                        } catch (Throwable ignore) {
 
-                    }
+                        }
 
-                    boolean isSlow = isConnectionSlow();
-                    for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
-                        ConnectionsManager.getInstance(a).checkConnection();
-                        FileLoader.getInstance(a).onNetworkChanged(isSlow);
-                    }
+                        boolean isSlow = isConnectionSlow();
+                        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                            if (a == 0 || ConnectionsManager.hasInstance(a)) {
+                                ConnectionsManager.getInstance(a).checkConnection();
+                                FileLoader.getInstance(a).onNetworkChanged(isSlow);
+                            }
+                        }
+                    });
                 }
             };
             IntentFilter filter = new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION);
@@ -269,6 +273,9 @@ public class ApplicationLoader extends Application {
         SharedPrefsHelper.init(applicationContext);
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) { //TODO improve account
             UserConfig.getInstance(a).loadConfig();
+            if (a != 0 && !UserConfig.getInstance(a).isClientActivated()) {
+                continue;
+            }
             MessagesController.getInstance(a);
             if (a == 0) {
                 SharedConfig.pushStringStatus = "__FIREBASE_GENERATING_SINCE_" + ConnectionsManager.getInstance(a).getCurrentTime() + "__";
@@ -290,6 +297,9 @@ public class ApplicationLoader extends Application {
 
         MediaController.getInstance();
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) { //TODO improve account
+            if (a != 0 && !UserConfig.getInstance(a).isClientActivated()) {
+                continue;
+            }
             ContactsController.getInstance(a).checkAppAccount();
             DownloadController.getInstance(a);
         }
@@ -328,6 +338,8 @@ public class ApplicationLoader extends Application {
             applicationContext = getApplicationContext();
         }
 
+        applicationContext.getSharedPreferences("globalConfig", Context.MODE_PRIVATE);
+
         NativeLoader.initNativeLibs(ApplicationLoader.applicationContext);
         try {
             ConnectionsManager.native_setJava(false);
@@ -362,22 +374,25 @@ public class ApplicationLoader extends Application {
     }
 
     public static void startPushService() {
-        SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
-        boolean enabled;
-        if (preferences.contains("pushService")) {
-            enabled = preferences.getBoolean("pushService", true);
-        } else {
-            enabled = MessagesController.getMainSettings(UserConfig.selectedAccount).getBoolean("keepAliveService", false);
-        }
-        if (enabled) {
-            try {
-                applicationContext.startService(new Intent(applicationContext, NotificationsService.class));
-            } catch (Throwable ignore) {
-
+        Utilities.globalQueue.postRunnable(() -> {
+            SharedPreferences preferences = applicationContext.getSharedPreferences("Notifications", Context.MODE_PRIVATE);
+            boolean enabled;
+            if (preferences.contains("pushService")) {
+                enabled = preferences.getBoolean("pushService", true);
+            } else {
+                final int account = UserConfig.selectedAccount;
+                enabled = applicationContext.getSharedPreferences(account == 0 ? "mainconfig" : "mainconfig" + account, Context.MODE_PRIVATE).getBoolean("keepAliveService", false);
             }
-        } else {
-            applicationContext.stopService(new Intent(applicationContext, NotificationsService.class));
-        }
+            if (enabled) {
+                try {
+                    applicationContext.startService(new Intent(applicationContext, NotificationsService.class));
+                } catch (Throwable ignore) {
+
+                }
+            } else {
+                applicationContext.stopService(new Intent(applicationContext, NotificationsService.class));
+            }
+        });
     }
 
     @Override
@@ -432,19 +447,21 @@ public class ApplicationLoader extends Application {
                 }
                 currentNetworkInfo = connectivityManager.getActiveNetworkInfo();
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    if (networkCallback == null) {
-                        networkCallback = new ConnectivityManager.NetworkCallback() {
-                            @Override
-                            public void onAvailable(@NonNull Network network) {
-                                lastKnownNetworkType = -1;
-                            }
+                    synchronized (ApplicationLoader.class) {
+                        if (networkCallback == null) {
+                            networkCallback = new ConnectivityManager.NetworkCallback() {
+                                @Override
+                                public void onAvailable(@NonNull Network network) {
+                                    lastKnownNetworkType = -1;
+                                }
 
-                            @Override
-                            public void onCapabilitiesChanged(@NonNull Network network, @NonNull NetworkCapabilities networkCapabilities) {
-                                lastKnownNetworkType = -1;
-                            }
-                        };
-                        connectivityManager.registerDefaultNetworkCallback(networkCallback);
+                                @Override
+                                public void onCapabilitiesChanged(@NonNull Network network, @NonNull NetworkCapabilities networkCapabilities) {
+                                    lastKnownNetworkType = -1;
+                                }
+                            };
+                            connectivityManager.registerDefaultNetworkCallback(networkCallback);
+                        }
                     }
                 }
             } catch (Throwable ignore) {

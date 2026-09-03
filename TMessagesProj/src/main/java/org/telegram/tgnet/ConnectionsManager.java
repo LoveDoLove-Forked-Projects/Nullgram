@@ -221,6 +221,12 @@ public class ConnectionsManager extends BaseController {
         return localInstance;
     }
 
+    public static boolean hasInstance(int num) {
+        synchronized (ConnectionsManager.class) {
+            return Instance[num] != null;
+        }
+    }
+
     public ConnectionsManager(int instance) {
         super(instance);
         connectionState = native_getConnectionState(currentAccount);

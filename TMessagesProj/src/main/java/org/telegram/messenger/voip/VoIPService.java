@@ -167,8 +167,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import top.qwq2333.nullgram.utils.PermissionUtils;
-
 @SuppressLint("NewApi")
 public class VoIPService extends Service implements SensorEventListener, AudioManager.OnAudioFocusChangeListener, VoIPController.ConnectionStateListener, NotificationCenter.NotificationCenterDelegate, VoIPServiceState {
 
@@ -881,6 +879,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 					if (sharedInstance == null) return;
 					if (!granted) return;
 					setMicMute(false, false, true);
+					updateCurrentForegroundType();
 				});
 			}
 			startConferenceGroupCall(false, 0, null, false);
@@ -1261,8 +1260,8 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 	public void createCaptureDevice(boolean screencast) {
 		if (screencast) {
 			gotMediaProjection = true;
-			updateCurrentForegroundType();
 		}
+		updateCurrentForegroundType();
 
 		int index = screencast ? CAPTURE_DEVICE_SCREEN : CAPTURE_DEVICE_CAMERA;
 		int deviceType;
@@ -1369,6 +1368,8 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 	}
 
 	public void stopScreenCapture() {
+		gotMediaProjection = false;
+		updateCurrentForegroundType();
 		if (groupCall == null || videoState[CAPTURE_DEVICE_SCREEN] != Instance.VIDEO_STATE_ACTIVE) {
 			return;
 		}
@@ -4018,20 +4019,10 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 			builder.setLargeIcon(photo);
 		}
 		try {
-			if (foregroundStarted) {
-				try {
-					stopForeground(true);
-				} catch (Exception e) {
-					FileLog.e(e);
-				}
-			}
+			startForegroundWithType(ID_ONGOING_CALL_NOTIFICATION, builder.getNotification());
 			foregroundStarted = true;
-			if (Build.VERSION.SDK_INT >= 33) {
-				startForeground(foregroundId = ID_ONGOING_CALL_NOTIFICATION, foregroundNotification = builder.getNotification(), lastForegroundType = getCurrentForegroundType());
-			} else {
-				startForeground(foregroundId = ID_ONGOING_CALL_NOTIFICATION, foregroundNotification = builder.getNotification());
-			}
 		} catch (Exception e) {
+			FileLog.e(e);
 			if (photo != null && e instanceof IllegalArgumentException) {
 				showNotification(name, null);
 			}
@@ -4684,11 +4675,11 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 				} else {
 					bldr.setSmallIcon(R.drawable.ic_call);
 				}
-				foregroundStarted = true;
-				if (Build.VERSION.SDK_INT >= 33) {
-					startForeground(foregroundId = ID_ONGOING_CALL_NOTIFICATION, foregroundNotification = bldr.build(), lastForegroundType = getCurrentForegroundType());
-				} else {
-					startForeground(foregroundId = ID_ONGOING_CALL_NOTIFICATION, foregroundNotification = bldr.build());
+				try {
+					startForegroundWithType(ID_ONGOING_CALL_NOTIFICATION, bldr.build());
+					foregroundStarted = true;
+				} catch (Exception e) {
+					FileLog.e(e);
 				}
 			} else {
 				NotificationsController.checkOtherNotificationsChannel();
@@ -4696,11 +4687,11 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 						.setContentTitle(LocaleController.getString(R.string.VoipCallEnded))
 						.setShowWhen(false);
 				bldr.setSmallIcon(R.drawable.ic_call);
-				foregroundStarted = true;
-				if (Build.VERSION.SDK_INT >= 33) {
-					startForeground(foregroundId = ID_ONGOING_CALL_NOTIFICATION, foregroundNotification = bldr.build(), lastForegroundType = getCurrentForegroundType());
-				} else {
-					startForeground(foregroundId = ID_ONGOING_CALL_NOTIFICATION, foregroundNotification = bldr.build());
+				try {
+					startForegroundWithType(ID_ONGOING_CALL_NOTIFICATION, bldr.build());
+					foregroundStarted = true;
+				} catch (Exception e) {
+					FileLog.e(e);
 				}
 			}
 		}
@@ -5291,11 +5282,11 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 			builder.addAction(R.drawable.ic_call, answerTitle, answerPendingIntent);
 			incomingNotification = builder.getNotification();
 		}
-		foregroundStarted = true;
-		if (Build.VERSION.SDK_INT >= 33) {
-			startForeground(foregroundId = ID_INCOMING_CALL_NOTIFICATION, foregroundNotification = incomingNotification, lastForegroundType = getCurrentForegroundType());
-		} else {
-			startForeground(foregroundId = ID_INCOMING_CALL_NOTIFICATION, foregroundNotification = incomingNotification);
+		try {
+			startForegroundWithType(ID_INCOMING_CALL_NOTIFICATION, incomingNotification);
+			foregroundStarted = true;
+		} catch (Exception e) {
+			FileLog.e(e);
 		}
 		startRingtoneAndVibration();
 	}
@@ -5328,17 +5319,39 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 		if (gotMediaProjection) {
 			type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;
 		}
+		type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL;
 		type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
 		return type;
 	}
 
+	private void startForegroundWithType(int id, Notification notification) {
+		if (Build.VERSION.SDK_INT >= 33) {
+			int type = getCurrentForegroundType();
+			try {
+				startForeground(id, notification, type);
+			} catch (SecurityException e) {
+				FileLog.e(e);
+				// mic/camera need while-in-use eligibility, mediaProjection needs the projection AppOp;
+				// phoneCall needs only the manifest-declared MANAGE_OWN_CALLS
+				type = getCurrentForegroundType() & ~(ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE | ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+				startForeground(id, notification, type);
+			}
+			foregroundId = id;
+			foregroundNotification = notification;
+			lastForegroundType = type;
+		} else {
+			startForeground(id, notification);
+			foregroundId = id;
+			foregroundNotification = notification;
+		}
+	}
+
 	public void updateCurrentForegroundType() {
 		if (lastForegroundType != getCurrentForegroundType() && foregroundStarted) {
-			stopForeground(true);
-			if (Build.VERSION.SDK_INT >= 33) {
-				startForeground(foregroundId, foregroundNotification, lastForegroundType = getCurrentForegroundType());
-			} else {
-				startForeground(foregroundId, foregroundNotification);
+			try {
+				startForegroundWithType(foregroundId, foregroundNotification);
+			} catch (Exception e) {
+				FileLog.e(e);
 			}
 		}
 	}
