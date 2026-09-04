@@ -1139,8 +1139,8 @@ public class VoIPFragment implements
                         FileLog.e(e);
                     }
                 } else {
-                    if (PermissionUtils.isRecordAudioPermissionGranted()) {
-                        PermissionUtils.requestRecordAudioPermission(activity);
+                    if (!PermissionUtils.isRecordAudioPermissionGranted()) {
+                        PermissionUtils.requestRecordAudioPermission(activity, REQUEST_CODE_ACCEPT_CALL);
                     } else {
                         if (VoIPService.getSharedState() != null) {
                             runAcceptCallAnimation(() -> {
@@ -2983,9 +2983,12 @@ public class VoIPFragment implements
         }
     }
 
+    // 101/102 are claimed by ChatActivity/ProfileActivity outgoing-call handlers on the shared LaunchActivity dispatcher
+    private static final int REQUEST_CODE_ACCEPT_CALL = 1101;
+
     @TargetApi(Build.VERSION_CODES.M)
     private void onRequestPermissionsResultInternal(int requestCode, String[] permissions, int[] grantResults) {
-        if (requestCode == 101) {
+        if (requestCode == REQUEST_CODE_ACCEPT_CALL) {
             if (VoIPService.getSharedState() == null) {
                 windowView.finish();
                 return;

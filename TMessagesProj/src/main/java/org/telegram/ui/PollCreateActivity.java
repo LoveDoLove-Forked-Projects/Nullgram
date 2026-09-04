@@ -763,7 +763,7 @@ public class PollCreateActivity extends BaseFragment implements NotificationCent
                 int count = listView.getChildCount();
                 for (int a = answerStartRow; a < answerStartRow + answersCount; a++) {
                     RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(a);
-                    if (holder != null && holder.itemView instanceof PollEditTextCell) {
+                    if (holder != null && holder.getItemViewType() == 5) {
                         PollEditTextCell pollEditTextCell = (PollEditTextCell) holder.itemView;
                         pollEditTextCell.setShowCheckBox(quizPoll, true);
                         pollEditTextCell.setChecked(answersChecks[a - answerStartRow], wasChecksBefore);
@@ -889,7 +889,7 @@ public class PollCreateActivity extends BaseFragment implements NotificationCent
         int count = listView.getChildCount();
         for (int a = answerStartRow; a < answerStartRow + answersCount; a++) {
             RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(a);
-            if (holder != null && holder.itemView instanceof PollEditTextCell) {
+            if (holder != null && holder.getItemViewType() == 5) {
                 PollEditTextCell pollEditTextCell = (PollEditTextCell) holder.itemView;
                 if (pollEditTextCell.getTop() > AndroidUtilities.dp(40)) {
                     hintView.showForView(pollEditTextCell.getCheckBox(), true);

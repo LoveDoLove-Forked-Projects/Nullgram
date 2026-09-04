@@ -185,14 +185,14 @@ object TranslateHelper {
 
     @JvmStatic
     @JvmOverloads
-    fun translate(obj: Any, from: String, to: String = getCurrentProvider().getCurrentTargetLanguage(), onSuccess: (Any, String, String) -> Unit, onError: (Exception) -> Unit) {
+    fun translate(obj: Any, from: String?, to: String = getCurrentProvider().getCurrentTargetLanguage(), onSuccess: (Any, String, String) -> Unit, onError: (Exception) -> Unit) {
         val translator = getCurrentProvider()
         if (!translator.supportLanguage(to)) {
             onError(UnsupportedTargetLanguageException())
         } else {
             CoroutineScope(Dispatchers.Main).launch {
                 val result = withContext(Dispatchers.IO) {
-                    translator.translate(obj, from, to)
+                    translator.translate(obj, from.orEmpty(), to)
                 }
                 if (result.error != null) {
                     if (result.error == HttpStatusCode.TooManyRequests) {

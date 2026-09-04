@@ -2537,6 +2537,7 @@ public class ChatActivityEnterView extends FrameLayout implements
     @SuppressLint("ClickableViewAccessibility")
     public ChatActivityEnterView(Activity context, SizeNotifierFrameLayout parent, ChatActivity fragment, final boolean isChat, Theme.ResourcesProvider resourcesProvider) {
         super(context);
+        Theme.createChatResources(context, false);
         this.resourcesProvider = resourcesProvider;
         this.isChat = isChat;
 

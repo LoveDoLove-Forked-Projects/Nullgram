@@ -445,7 +445,13 @@ public class VoIPPreNotificationService { // } extends Service implements AudioM
             pendingCall = call;
 
             final NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-            nm.notify(VoIPService.ID_INCOMING_CALL_PRENOTIFICATION, makeNotification(context, account, user_id, call.id, video));
+            final Notification notification = makeNotification(context, account, user_id, call.id, video);
+            if (notification == null) {
+                FileLog.e("VoIPPreNotification.show(): makeNotification returned null, dismissing");
+                dismiss(context, false);
+                return;
+            }
+            nm.notify(VoIPService.ID_INCOMING_CALL_PRENOTIFICATION, notification);
             startRinging(context, account, user_id);
         });
     }

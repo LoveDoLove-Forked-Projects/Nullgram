@@ -4060,6 +4060,13 @@ public class PeerStoriesView extends SizeNotifierFrameLayout implements Notifica
         } else {
             isSelf = false;
             isChannel = true;
+            if (reactionsCounter == null) {
+                reactionsCounter = new AnimatedTextView.AnimatedTextDrawable();
+                reactionsCounter.setCallback(likeButtonContainer);
+                reactionsCounter.setTextColor(resourcesProvider.getColor(Theme.key_windowBackgroundWhiteBlackText));
+                reactionsCounter.setTextSize(AndroidUtilities.dp(14));
+                reactionsCounterProgress = new AnimatedFloat(likeButtonContainer);
+            }
 
             if (storiesController.canEditStories(dialogId) || BuildVars.DEBUG_PRIVATE_VERSION) {
                 userCanSeeViews = true;
@@ -4100,13 +4107,6 @@ public class PeerStoriesView extends SizeNotifierFrameLayout implements Notifica
                 chatActivityEnterView.getEditField().setText(storyViewer.getDraft(dialogId, currentStory.storyItem));
                 chatActivityEnterView.setDialogId(dialogId, currentAccount);
                 chatActivityEnterView.updateRecordButton(chat, null);
-            }
-            if (reactionsCounter == null) {
-                reactionsCounter = new AnimatedTextView.AnimatedTextDrawable();
-                reactionsCounter.setCallback(likeButtonContainer);
-                reactionsCounter.setTextColor(resourcesProvider.getColor(Theme.key_windowBackgroundWhiteBlackText));
-                reactionsCounter.setTextSize(AndroidUtilities.dp(14));
-                reactionsCounterProgress = new AnimatedFloat(likeButtonContainer);
             }
 
             if (repostButtonContainer != null && repostCounter == null) {
@@ -5723,14 +5723,16 @@ public class PeerStoriesView extends SizeNotifierFrameLayout implements Notifica
                 } else {
                     repostCounterVisible = false;
                 }
-                if (storyItem.views.reactions_count > 0) {
+                if (reactionsCounter != null && storyItem.views.reactions_count > 0) {
                     reactionsCounter.setText(Integer.toString(storyItem.views.reactions_count), animated && reactionsCounterVisible);
                     reactionsCounterVisible = true;
                 } else {
                     reactionsCounterVisible = false;
                 }
                 if (!animated) {
-                    reactionsCounterProgress.set(reactionsCounterVisible ? 1f : 0, true);
+                    if (reactionsCounterProgress != null) {
+                        reactionsCounterProgress.set(reactionsCounterVisible ? 1f : 0, true);
+                    }
                     if (repostCounterProgress != null) {
                         repostCounterProgress.set(repostCounterVisible ? 1f : 0, true);
                     }

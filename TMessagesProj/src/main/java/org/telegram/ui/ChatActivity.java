@@ -2087,24 +2087,29 @@ public class ChatActivity extends BaseFragment implements
                 selectedObject = message;
                 selectedObjectGroup = getValidGroupedMessage(message);
                 switch (Config.getDoubleTab()) {
-                    case Defines.doubleTabTranslate:
-                        if (!selectedObject.translated && LanguageDetector.hasSupport()) {
+                    case Defines.doubleTabTranslate: {
+                        final MessageObject translateTarget = getMessageUtils().getMessageForTranslate(selectedObject, selectedObjectGroup);
+                        if (translateTarget == null) {
+                            break;
+                        }
+                        if (!translateTarget.translated && LanguageDetector.hasSupport()) {
                             final AtomicBoolean waitForLangDetection = new AtomicBoolean(false);
                             final AtomicReference<Runnable> onLangDetectionDone = new AtomicReference(null);
                             final String[] fromLang = {null};
-                            LanguageDetectorTimeout.detectLanguage(cell, getMessageUtils().getMessagePlainText(selectedObject), (String lang) -> {
+                            LanguageDetectorTimeout.detectLanguage(cell, getMessageUtils().getMessagePlainText(translateTarget), (String lang) -> {
                                     fromLang[0] = TranslateHelper.stripLanguageCode(lang);
                                     if (!TranslateHelper.isLanguageRestricted(lang)
-                                        || (currentChat != null && (currentChat.has_link || ChatObject.isPublic(currentChat) || selectedObject.messageOwner.fwd_from != null)) && (
+                                        || (currentChat != null && (currentChat.has_link || ChatObject.isPublic(currentChat) || translateTarget.messageOwner.fwd_from != null)) && (
                                         "uk".equals(fromLang[0]) || "ru".equals(fromLang[0]))) {
-                                        translateOrResetMessage(selectedObject, fromLang[0]);
+                                        translateOrResetMessage(translateTarget, fromLang[0]);
                                     }
                                 }, null, waitForLangDetection, onLangDetectionDone
                             );
                         } else {
-                            translateOrResetMessage(selectedObject, null);
+                            translateOrResetMessage(translateTarget, null);
                         }
                         break;
+                    }
                     case Defines.doubleTabReply:
                         processSelectedOption(OPTION_REPLY);
                         break;
@@ -3781,6 +3786,8 @@ public class ChatActivity extends BaseFragment implements
     @Override
     public View createView(Context context) {
         Timer t = Timer.create("ChatActivity.createView");
+
+        bottomViewsVisibilityController = new ChatActivityBottomViewsVisibilityController(this::onBottomItemsVisibilityChanged);
 
         blurredBackgroundColorProvider = new BlurredBackgroundColorProviderThemed(themeDelegate, Theme.key_chat_messagePanelBackground);
         blurredBackgroundColorProviderWhite = new BlurredBackgroundColorProviderThemed(themeDelegate, Theme.key_windowBackgroundWhite);
@@ -24441,7 +24448,7 @@ public class ChatActivity extends BaseFragment implements
     private Pattern sponsoredUrlPattern;
     private MessageObject botSponsoredMessage;
     private void addSponsoredMessages(boolean animated) {
-        if (sponsoredMessagesAdded || chatMode != 0 || !ChatObject.isChannel(currentChat) && !UserObject.isBot(currentUser) || !forwardEndReached[0] || getUserConfig().isPremium() && getMessagesController().isSponsoredDisabled() || isReport()) {
+        if (Config.blockSponsorAds || sponsoredMessagesAdded || chatMode != 0 || !ChatObject.isChannel(currentChat) && !UserObject.isBot(currentUser) || !forwardEndReached[0] || getUserConfig().isPremium() && getMessagesController().isSponsoredDisabled() || isReport()) {
             return;
         }
         MessagesController.SponsoredMessagesInfo res = getMessagesController().getSponsoredMessages(dialog_id);
@@ -24835,6 +24842,7 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private ArrayList<MessageObject> notPushedSponsoredMessages;
+    private int lastAdPlaceRetryMessagesSize;
     private void processNewMessages(ArrayList<MessageObject> arr) {
         processNewMessages(arr, true);
     }
@@ -25294,10 +25302,12 @@ public class ChatActivity extends BaseFragment implements
                 if (isAd && sponsoredMessagesPostsBetween > 0) {
                     placeToPaste = findAdPlace();
                     if (placeToPaste < 0 || placeToPaste > messages.size()) {
-                        if (notPushedSponsoredMessages == null) {
-                            notPushedSponsoredMessages = new ArrayList<>();
+                        if (arr != notPushedSponsoredMessages) {
+                            if (notPushedSponsoredMessages == null) {
+                                notPushedSponsoredMessages = new ArrayList<>();
+                            }
+                            notPushedSponsoredMessages.add(obj);
                         }
-                        notPushedSponsoredMessages.add(obj);
                         continue;
                     }
                 }
@@ -25588,7 +25598,12 @@ public class ChatActivity extends BaseFragment implements
         checkWaitingForReplies();
         updateReplyMessageHeader(true);
 
-        if (!isAd && notPushedSponsoredMessages != null && !notPushedSponsoredMessages.isEmpty() && arr != notPushedSponsoredMessages) {
+        if (lastAdPlaceRetryMessagesSize > messages.size()) {
+            lastAdPlaceRetryMessagesSize = messages.size();
+        }
+        if (!isAd && notPushedSponsoredMessages != null && !notPushedSponsoredMessages.isEmpty() && arr != notPushedSponsoredMessages
+                && messages.size() - lastAdPlaceRetryMessagesSize >= Math.max(1, sponsoredMessagesPostsBetween)) {
+            lastAdPlaceRetryMessagesSize = messages.size();
             processNewMessages(notPushedSponsoredMessages, false);
         }
         invalidatePremiumBlocked();
@@ -46053,7 +46068,7 @@ public class ChatActivity extends BaseFragment implements
         if (bottomChannelButtonsLayout != null) {
             final ViewGroup.LayoutParams params = bottomChannelButtonsLayout.getLayoutParams();
             final int height = Math.round(lerp((float) dp(48), dp(67) - dp(1.5f), getBottomOverlayStartButtonFactor(false)));
-            if (params.height != height) {
+            if (params != null && params.height != height) {
                 params.height = height;
                 bottomChannelButtonsLayout.requestLayout();
             }
@@ -46107,7 +46122,7 @@ public class ChatActivity extends BaseFragment implements
     public static final int MESSAGE_ACTION_CONTAINER = 5;
     public static final int MESSAGE_SEARCH_CONTAINER = 4;
 
-    private final ChatActivityBottomViewsVisibilityController bottomViewsVisibilityController =
+    private ChatActivityBottomViewsVisibilityController bottomViewsVisibilityController =
             new ChatActivityBottomViewsVisibilityController(this::onBottomItemsVisibilityChanged);
 
     private void checkBottomViewVisibility(View view, int containerId, boolean allowVisibilityChange) {

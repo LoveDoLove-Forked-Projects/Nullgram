@@ -62,18 +62,10 @@ object PermissionUtils {
     }
 
     @JvmStatic
-    fun isRecordAudioPermissionGranted(): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-        isPermissionGranted(Manifest.permission.RECORD_AUDIO) && isPermissionGranted(Manifest.permission.FOREGROUND_SERVICE_MICROPHONE)
-    } else {
-        isPermissionGranted(Manifest.permission.RECORD_AUDIO)
-    }
+    fun isRecordAudioPermissionGranted(): Boolean = isPermissionGranted(Manifest.permission.RECORD_AUDIO)
 
     @JvmStatic
-    fun isCameraPermissionGranted(): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-        isPermissionGranted(Manifest.permission.CAMERA) && isPermissionGranted(Manifest.permission.FOREGROUND_SERVICE_CAMERA)
-    } else {
-        isPermissionGranted(Manifest.permission.CAMERA)
-    }
+    fun isCameraPermissionGranted(): Boolean = isPermissionGranted(Manifest.permission.CAMERA)
 
     @JvmStatic
     fun isStoragePermissionGranted(): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -169,38 +161,12 @@ object PermissionUtils {
     @JvmStatic
     @JvmOverloads
     fun requestRecordAudioPermission(activity: Activity?, requestCode: Int = BasePermissionsActivity.REQUEST_CODE_CALLS) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            requestPermissions(
-                activity,
-                requestCode,
-                Manifest.permission.RECORD_AUDIO,
-                Manifest.permission.FOREGROUND_SERVICE_MICROPHONE,
-            )
-        } else {
-            requestPermissions(
-                activity,
-                BasePermissionsActivity.REQUEST_CODE_CALLS,
-                Manifest.permission.RECORD_AUDIO
-            )
-        }
+        requestPermissions(activity, requestCode, Manifest.permission.RECORD_AUDIO)
     }
 
     @JvmStatic
     fun requestCameraPermission(activity: Activity?) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            requestPermissions(
-                activity,
-                BasePermissionsActivity.REQUEST_CODE_VIDEO_MESSAGE,
-                Manifest.permission.CAMERA,
-                Manifest.permission.FOREGROUND_SERVICE_CAMERA,
-            )
-        } else {
-            requestPermissions(
-                activity,
-                BasePermissionsActivity.REQUEST_CODE_VIDEO_MESSAGE,
-                Manifest.permission.CAMERA
-            )
-        }
+        requestPermissions(activity, BasePermissionsActivity.REQUEST_CODE_VIDEO_MESSAGE, Manifest.permission.CAMERA)
     }
 
     @JvmStatic

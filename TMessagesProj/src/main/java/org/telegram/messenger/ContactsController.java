@@ -1797,7 +1797,7 @@ public class ContactsController extends BaseController {
     private void saveContactsLoadTime() {
         try {
             SharedPreferences preferences = MessagesController.getMainSettings(currentAccount);
-            preferences.edit().putLong("lastReloadStatusTime", System.currentTimeMillis()).commit();
+            preferences.edit().putLong("lastReloadStatusTime", System.currentTimeMillis()).apply();
         } catch (Exception e) {
             FileLog.e(e);
         }
@@ -2611,7 +2611,7 @@ public class ContactsController extends BaseController {
         getConnectionsManager().sendRequest(req, (response, error) -> {
             if (response instanceof Vector) {
                 AndroidUtilities.runOnUIThread(() -> {
-                    editor.remove("needGetStatuses").commit();
+                    editor.remove("needGetStatuses").apply();
                     Vector vector = (Vector) response;
                     if (!vector.objects.isEmpty()) {
                         ArrayList<TLRPC.User> dbUsersStatus = new ArrayList<>();

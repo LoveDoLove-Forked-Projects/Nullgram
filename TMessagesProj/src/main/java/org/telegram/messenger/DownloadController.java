@@ -285,7 +285,7 @@ public class DownloadController extends BaseController implements NotificationCe
             currentWifiPreset = preferences.getInt("currentWifiPreset", 3);
             currentRoamingPreset = preferences.getInt("currentRoamingPreset", 3);
             if (!newConfig) {
-                preferences.edit().putBoolean("newConfig", true).commit();
+                preferences.edit().putBoolean("newConfig", true).apply();
             }
         } else {
             int[] mobileDataDownloadMask = new int[4];

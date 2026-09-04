@@ -28,7 +28,7 @@ import java.util.Arrays
 
 object AnalyticsUtils {
     private var isInit = false
-    private val isEnabled = BuildConfig.APPLICATION_ID != Base64.decode("dG9wLnF3cTIzMzMubnVsbGdyYW0=", Base64.DEFAULT).contentToString()
+    private val isEnabled = BuildConfig.APPLICATION_ID != Base64.decode("dG9wLnF3cTIzMzMubnVsbGdyYW0=", Base64.DEFAULT).decodeToString()
 
     @JvmStatic
     fun start(app: Application) {

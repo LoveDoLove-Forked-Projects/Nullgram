@@ -137,20 +137,21 @@ abstract class BaseTranslator {
     /**
      * translate
      *
-     * @param source one of them: [String] or [TLRPC.TL_poll]
+     * @param source one of them: [CharSequence] (translated as its plain text) or [TLRPC.TL_poll]
      * @param from source language
      * @param to target language
      *
      * @return [TranslateResult]
      */
     open suspend fun translate(source: Any, from: String, to: String): TranslateResult {
+        val source = if (source is CharSequence) source.toString() else source
+        val from = convertLanguageCode(if (TextUtils.isEmpty(from) || "und" == from) "auto" else from, false)
+        val to = convertLanguageCode(to, false)
         val cachedResult: TranslateResult? = cache.get(Pair(source, to))
         if (cachedResult != null) {
             return cachedResult
         }
 
-        val from = convertLanguageCode(if (TextUtils.isEmpty(from) || "und" == from) "auto" else from, false)
-        val to = convertLanguageCode(to, false)
         when (source) {
             is String -> {
                 val result = doTranslateText(source, from, to)

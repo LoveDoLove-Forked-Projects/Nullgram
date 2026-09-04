@@ -5313,12 +5313,18 @@ public class NotificationsController extends BaseController {
                                     blurredAttach = new File(attach.getParentFile(), attach.getName() + ".blur.jpg");
                                     if (!blurredAttach.exists()) {
                                         try {
-                                            Bitmap bitmap = BitmapFactory.decodeFile(attach.getAbsolutePath());
+                                            BitmapFactory.Options opts = new BitmapFactory.Options();
+                                            opts.inJustDecodeBounds = true;
+                                            BitmapFactory.decodeFile(attach.getAbsolutePath(), opts);
+                                            opts.inJustDecodeBounds = false;
+                                            opts.inSampleSize = StoryEntry.calculateInSampleSize(opts, 1024, 1024);
+                                            Bitmap bitmap = BitmapFactory.decodeFile(attach.getAbsolutePath(), opts);
 
+                                            final int srcW = bitmap.getWidth(), srcH = bitmap.getHeight();
                                             Bitmap blurBitmap = Utilities.stackBlurBitmapMax(bitmap);
                                             bitmap.recycle();
 
-                                            Bitmap scaledBitmap = Bitmap.createScaledBitmap(blurBitmap, bitmap.getWidth(), bitmap.getHeight(), true);
+                                            Bitmap scaledBitmap = Bitmap.createScaledBitmap(blurBitmap, srcW, srcH, true);
                                             Utilities.stackBlurBitmap(scaledBitmap, 5);
                                             blurBitmap.recycle();
 
@@ -5335,7 +5341,8 @@ public class NotificationsController extends BaseController {
                                             scaledBitmap.recycle();
 
                                             attach = blurredAttach;
-                                        } catch (Exception e) {
+                                        } catch (Throwable e) {
+                                            attach = blurredAttach;
                                             FileLog.e(e);
                                         }
                                     }

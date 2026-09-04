@@ -576,7 +576,7 @@ class MessageUtils(num: Int) : BaseController(num) {
             val pollText = StringBuilder(poll.question.text).append("\n")
             for (answer in poll.answers) {
                 pollText.append("\n\uD83D\uDD18 ")
-                pollText.append(answer.text)
+                pollText.append(answer.text.text)
             }
             pollText.toString()
         } else if (messageObject.isVoiceTranscriptionOpen) {

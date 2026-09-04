@@ -1325,7 +1325,9 @@ public class TranslateAlert2 extends BottomSheet implements NotificationCenter.N
             headerView.setTranslationY(Math.max(AndroidUtilities.statusBarHeight, top));
             updateLightStatusBar(top <= AndroidUtilities.statusBarHeight / 2f);
 
-            topBulletinContainer.setTranslationY(-topBulletinContainer.getTop() - topBulletinContainer.getHeight() + getTranslationY() + Math.max(AndroidUtilities.statusBarHeight + dp(56) + topBulletinContainer.getHeight(), top));
+            if (topBulletinContainer != null) {
+                topBulletinContainer.setTranslationY(-topBulletinContainer.getTop() - topBulletinContainer.getHeight() + getTranslationY() + Math.max(AndroidUtilities.statusBarHeight + dp(56) + topBulletinContainer.getHeight(), top));
+            }
 
             bgPath.rewind();
             AndroidUtilities.rectTmp.set(0, top, getWidth(), getHeight() + R);
@@ -1338,7 +1340,9 @@ public class TranslateAlert2 extends BottomSheet implements NotificationCenter.N
         @Override
         public void setTranslationY(float translationY) {
             super.setTranslationY(translationY);
-            topBulletinContainer.setTranslationY(-topBulletinContainer.getTop() - topBulletinContainer.getHeight() + translationY + Math.max(AndroidUtilities.statusBarHeight + dp(56) + topBulletinContainer.getHeight(), getSheetTop()));
+            if (topBulletinContainer != null) {
+                topBulletinContainer.setTranslationY(-topBulletinContainer.getTop() - topBulletinContainer.getHeight() + translationY + Math.max(AndroidUtilities.statusBarHeight + dp(56) + topBulletinContainer.getHeight(), getSheetTop()));
+            }
         }
 
         private Boolean lightStatusBarFull;
