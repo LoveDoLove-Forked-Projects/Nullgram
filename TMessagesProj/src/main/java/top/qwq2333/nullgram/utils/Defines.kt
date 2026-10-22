@@ -106,6 +106,8 @@ object Defines {
     @StringConfig("") const val messageFilter = "messageFilter1"
     @BooleanConfig const val sendLargePhoto = "sendLargePhoto"
     @BooleanConfig const val takeGifAsVideo = "takeGifAsVideo"
+    @BooleanConfig const val alwaysShowDownloadIcon = "alwaysShowDownloadIcon"
+    @StringConfig("Nullgram") const val customSavePath = "customSavePath"
 
     /**
      * 0 default 1 online 2 offline
